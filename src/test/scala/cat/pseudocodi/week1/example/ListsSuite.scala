@@ -1,8 +1,6 @@
 package cat.pseudocodi.week1.example
 
-import org.junit.runner.RunWith
 import org.scalatest.FunSuite
-import org.scalatest.junit.JUnitRunner
 
 /**
  * This class implements a ScalaTest test suite for the methods in object
@@ -22,7 +20,6 @@ import org.scalatest.junit.JUnitRunner
  * - Start the sbt console and run the "test" command
  * - Right-click this file in eclipse and chose "Run As" - "JUnit Test"
  */
-@RunWith(classOf[JUnitRunner])
 class ListsSuite extends FunSuite {
   /**
    * Tests are written using the `test` operator which takes two arguments:
