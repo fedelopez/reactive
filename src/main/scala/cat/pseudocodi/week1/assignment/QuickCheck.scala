@@ -27,17 +27,10 @@ abstract class QuickCheckHeap
   }
 
   property("insert list") = forAll { (l: List[A]) =>
-    def fromList(acc: List[A], acch: H, curr: A): A = {
-      if (acc.isEmpty) curr
-      else {
-        val m: H = meld(insert(acc.head, empty), acch)
-        fromList(acc.tail, m, findMin(m))
-      }
-    }
     if (l.isEmpty) true
     else {
-      val res: A = fromList(l, empty, 0)
-      l.sorted.head == res
+      val res: H = fromList(l, empty)
+      l.sorted == removeAll(res, List()).reverse
     }
   }
 
@@ -48,13 +41,6 @@ abstract class QuickCheckHeap
 
   //Given any heap, you should get a sorted sequence of elements when continually finding and deleting minima. (Hint: recursion and helper functions are your friends.)
   property("gen1") = forAll { (h: H) =>
-    def removeAll(acc: H, removed: List[Int]): List[Int] = {
-      if (isEmpty(acc)) removed
-      else {
-        val min: A = findMin(acc)
-        removeAll(deleteMin(acc), min :: removed)
-      }
-    }
     val all: List[A] = removeAll(h, List())
     all.reverse == all.sorted
   }
@@ -87,13 +73,27 @@ abstract class QuickCheckHeap
     !isEmpty(h)
   }
 
+  def fromList(l: List[A], h: H): H = {
+    if (l.isEmpty) h
+    else {
+      fromList(l.tail, insert(l.head, h))
+    }
+  }
+
+  def removeAll(h: H, removed: List[Int]): List[Int] = {
+    if (isEmpty(h)) removed
+    else {
+      val min = findMin(h)
+      removeAll(deleteMin(h), min :: removed)
+    }
+  }
+
   lazy val genHeap: Gen[H] = genHeapFunct(empty)
 
   def genHeapFunct(h: H): Gen[H] = for {
     arb1 <- arbitrary[A]
-    h <- oneOf(const(h), genHeapFunct(insert(arb1, h)))
-  } yield h
-
+    res <- oneOf(const(h), genHeapFunct(insert(arb1, h)))
+  } yield res
 
   implicit lazy val arbHeap: Arbitrary[H] = Arbitrary(genHeap)
 
