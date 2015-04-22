@@ -58,5 +58,21 @@ class PolynomialSuite extends FunSuite with ShouldMatchers {
     assert(res().head.isNaN)
   }
 
+  test("computeSolutions should be empty") {
+    val a = Var(1.0)
+    val b = Var(1.0)
+    val c = Var(1.0)
+    val res = Polynomial.computeSolutions(a, b, c, Polynomial.computeDelta(a, b, c))
+    assert(0 == res().size)
+  }
+
+  test("computeSolutions with one root only") {
+    val a = Var(2.0)
+    val b = Var(4.0)
+    val c = Var(2.0)
+    val res = Polynomial.computeSolutions(a, b, c, Polynomial.computeDelta(a, b, c))
+    assert(1 == res().size)
+    assert(-1.0 == res().head)
+  }
 
 }

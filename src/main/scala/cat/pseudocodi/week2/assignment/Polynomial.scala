@@ -17,6 +17,7 @@ object Polynomial {
       num / denom
     }
     if (a() == 0) Signal(Set(Double.NaN))
+    else if (computeDelta(a, b, c)() < 0) Signal(Set())
     else Signal(Set(doIt(_ + _), doIt(_ - _)))
   }
 
