@@ -5,8 +5,7 @@ import org.scalacheck.Gen._
 import org.scalacheck.Prop._
 import org.scalacheck._
 
-abstract class QuickCheckHeap
-  extends Properties("Heap") with IntHeap {
+abstract class QuickCheckHeap extends Properties("Heap") with IntHeap {
 
   property("min empty heap") = forAll { a: Int =>
     val h = insert(a, empty)

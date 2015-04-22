@@ -64,6 +64,12 @@ class PolynomialSuite extends FunSuite with ShouldMatchers {
     val c = Var(1.0)
     val res = Polynomial.computeSolutions(a, b, c, Polynomial.computeDelta(a, b, c))
     assert(0 == res().size)
+
+    c() = 5.0
+    assert(0 == res().size)
+
+    a() = 10.0
+    assert(0 == res().size)
   }
 
   test("computeSolutions with one root only") {
@@ -73,6 +79,25 @@ class PolynomialSuite extends FunSuite with ShouldMatchers {
     val res = Polynomial.computeSolutions(a, b, c, Polynomial.computeDelta(a, b, c))
     assert(1 == res().size)
     assert(-1.0 == res().head)
+  }
+
+  test("the roots of x2 −x − 6  are −2 and 3") {
+    val a = Var(1.0)
+    val b = Var(-1.0)
+    val c = Var(-6.0)
+    val res = Polynomial.computeSolutions(a, b, c, Polynomial.computeDelta(a, b, c))
+    assert(2 == res().size)
+    assert(res().contains(-2.0))
+    assert(res().contains(3.0))
+  }
+
+  test("the root of 3x2 -6 x+ 3 is 1") {
+    val a = Var(3.0)
+    val b = Var(-6.0)
+    val c = Var(3.0)
+    val res = Polynomial.computeSolutions(a, b, c, Polynomial.computeDelta(a, b, c))
+    assert(1 == res().size)
+    assert(res().contains(1.0))
   }
 
 }
