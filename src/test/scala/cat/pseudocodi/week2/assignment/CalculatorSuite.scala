@@ -33,7 +33,7 @@ class CalculatorSuite extends FunSuite with ShouldMatchers {
   }
 
   test("computeValues") {
-    val values: Predef.Map[String, Signal[Double]] = computeValues(Map("a" -> Signal(Literal(3)), "b" -> Signal(Literal(4))))
+    val values = computeValues(Map("a" -> Signal(Literal(3)), "b" -> Signal(Literal(4))))
     assert(values.size == 2)
     val aSignal: Signal[Double] = values("a")
     assert(aSignal() == 3.0)
@@ -44,12 +44,23 @@ class CalculatorSuite extends FunSuite with ShouldMatchers {
   test("computeValues with sum") {
     val signal1: Signal[Expr] = Signal(Plus(Literal(3), Literal(5)))
     val signal2: Signal[Expr] = Signal(Plus(Literal(4), Literal(3)))
-    val values: Predef.Map[String, Signal[Double]] = computeValues(Map("a" -> signal1, "b" -> signal2))
+    val values = computeValues(Map("a" -> signal1, "b" -> signal2))
     assert(values.size == 2)
     val aSignal: Signal[Double] = values("a")
     assert(aSignal() == 8.0)
     val bSignal: Signal[Double] = values("b")
     assert(bSignal() == 7.0)
+  }
+
+  test("computeValues dynamic with sum") {
+    val signalExpr: Var[Expr] = Var(Plus(Literal(3), Literal(5)))
+    val values = computeValues(Map("a" -> signalExpr))
+    val aSignal = values("a")
+
+    signalExpr() = Plus(Literal(3), Literal(8))
+    assert(aSignal() == 11.0)
+    signalExpr() = Minus(Literal(3), Literal(8))
+    assert(aSignal() == -5.0)
   }
 
   test("computeValues with ref") {
