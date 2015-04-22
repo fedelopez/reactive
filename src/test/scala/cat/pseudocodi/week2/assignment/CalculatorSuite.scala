@@ -1,5 +1,6 @@
 package cat.pseudocodi.week2.assignment
 
+import cat.pseudocodi.week2.assignment.Calculator.computeValues
 import org.scalatest.{FunSuite, _}
 
 import scala.collection.immutable.Map
@@ -31,13 +32,8 @@ class CalculatorSuite extends FunSuite with ShouldMatchers {
     assert(eval == 3)
   }
 
-  test("eval ref") {
-    val eval: Double = Calculator.eval(Ref("b"), Map("a" -> Signal(Literal(3)), "b" -> Signal(Plus(Ref("a"), Literal(4)))))
-    assert(eval == 7)
-  }
-
   test("computeValues") {
-    val values: Predef.Map[String, Signal[Double]] = Calculator.computeValues(Map("a" -> Signal(Literal(3)), "b" -> Signal(Literal(4))))
+    val values: Predef.Map[String, Signal[Double]] = computeValues(Map("a" -> Signal(Literal(3)), "b" -> Signal(Literal(4))))
     assert(values.size == 2)
     val aSignal: Signal[Double] = values("a")
     assert(aSignal() == 3.0)
@@ -45,5 +41,25 @@ class CalculatorSuite extends FunSuite with ShouldMatchers {
     assert(bSignal() == 4.0)
   }
 
+  test("computeValues with sum") {
+    val signal1: Signal[Expr] = Signal(Plus(Literal(3), Literal(5)))
+    val signal2: Signal[Expr] = Signal(Plus(Literal(4), Literal(3)))
+    val values: Predef.Map[String, Signal[Double]] = computeValues(Map("a" -> signal1, "b" -> signal2))
+    assert(values.size == 2)
+    val aSignal: Signal[Double] = values("a")
+    assert(aSignal() == 8.0)
+    val bSignal: Signal[Double] = values("b")
+    assert(bSignal() == 7.0)
+  }
 
+  test("computeValues with ref") {
+    val signal1: Signal[Expr] = Signal(Plus(Literal(3), Literal(5)))
+    val signal2: Signal[Expr] = Signal(Plus(Literal(4), Ref("a")))
+    val values: Predef.Map[String, Signal[Double]] = computeValues(Map("a" -> signal1, "b" -> signal2))
+    assert(values.size == 2)
+    val aSignal: Signal[Double] = values("a")
+    assert(aSignal() == 8.0)
+    val bSignal: Signal[Double] = values("b")
+    assert(bSignal() == 12.0)
+  }
 }
