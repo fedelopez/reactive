@@ -12,10 +12,12 @@ object Polynomial {
       val denom = 2 * a()
       num / denom
     }
-    if (a() == 0) Signal(Set(Double.NaN))
-    else if (delta() < 0) Signal(Set())
-    else Signal(Set(doIt(_ + _), doIt(_ - _)))
+    def computeReturn(): Set[Double] = {
+      if (a() == 0) Set(Double.NaN)
+      else if (delta() < 0) Set()
+      else Set(doIt(_ + _), doIt(_ - _))
+    }
+    Signal(computeReturn())
   }
-
 
 }
