@@ -73,4 +73,13 @@ class CalculatorSuite extends FunSuite with ShouldMatchers {
     val bSignal: Signal[Double] = values("b")
     assert(bSignal() == 12.0)
   }
+
+  //todo
+  test("computeValues with cyclic ref should return Double.NaN") {
+    val signal1: Signal[Expr] = Signal(Plus(Literal(3), Ref("a")))
+    val values = computeValues(Map("a" -> signal1))
+    assert(values.size == 1)
+    val aSignal: Signal[Double] = values("a")
+    assert(aSignal().isNaN)
+  }
 }
