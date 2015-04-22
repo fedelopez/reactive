@@ -50,6 +50,20 @@ class PolynomialSuite extends FunSuite with ShouldMatchers {
     assert(res().contains(0.41886116991581024))
   }
 
+  test("computeSolutions with dynamic values after no values") {
+    val a = Var(0.0)
+    val b = Var(0.0)
+    val c = Var(0.0)
+    val delta = Var(0.0)
+    val res = Polynomial.computeSolutions(a, b, c, delta)
+
+    a() = 1.0
+    b() = -4.0
+    c() = 1.0
+    assert(1 == res().size)
+    assert(res().contains(2.0))
+  }
+
   test("computeSolutions when a is zero") {
     val a = Var(0.0)
     val b = Var(1.0)
