@@ -1,6 +1,6 @@
 package cat.pseudocodi.week2.assignment
 
-import cat.pseudocodi.week2.assignment.Calculator.computeValues
+import cat.pseudocodi.week2.assignment.Calculator._
 import org.scalatest.{FunSuite, _}
 
 import scala.collection.immutable.Map
@@ -74,9 +74,25 @@ class CalculatorSuite extends FunSuite with ShouldMatchers {
     assert(bSignal() == 12.0)
   }
 
-  //todo
+  test("computeValues with double cyclic ref should return Double.NaN") {
+    val signalA: Signal[Expr] = Signal(Ref("a"))
+    val signalB: Signal[Expr] = Signal(Ref("b"))
+    val values = computeValues(Map("a" -> signalB, "b" -> signalA))
+    assert(values.size == 2)
+    assert(values("a")().isNaN)
+    assert(values("b")().isNaN)
+  }
+
+  test("computeValues with simple cyclic ref should return Double.NaN") {
+    val signal1: Signal[Expr] = Signal(Ref("a"))
+    val values = computeValues(Map("a" -> signal1))
+    assert(values.size == 1)
+    val aSignal: Signal[Double] = values("a")
+    assert(aSignal().isNaN)
+  }
+
   test("computeValues with cyclic ref should return Double.NaN") {
-    val signal1: Signal[Expr] = Signal(Plus(Literal(3), Ref("a")))
+    val signal1: Signal[Expr] = Signal(Plus(Ref("a"), Literal(3)))
     val values = computeValues(Map("a" -> signal1))
     assert(values.size == 1)
     val aSignal: Signal[Double] = values("a")
