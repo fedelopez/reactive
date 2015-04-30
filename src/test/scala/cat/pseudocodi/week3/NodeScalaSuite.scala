@@ -15,7 +15,7 @@ class NodeScalaSuite extends FunSuite {
 
   test("A Future should always be completed") {
     val always = Future.always(517)
-    assert(Await.result(always, 0 nanos) == 517)
+    assert(517 === Await.result(always, 0 nanos))
   }
 
   test("A Future should never be completed") {
@@ -95,6 +95,33 @@ class NodeScalaSuite extends FunSuite {
     } catch {
       case t: TimeoutException => // ok!
     }
+  }
+
+  test("now should throw exception if not ready yet") {
+    val future: Future[Unit] = Future.delay(5 seconds)
+    try {
+      Await.result(future, 1 seconds)
+      assert(false)
+    } catch {
+      case t: TimeoutException => // ok!
+    }
+    try {
+      future.now
+      assert(false)
+    } catch {
+      case t: NoSuchElementException => // ok!
+    }
+  }
+
+  test("now should return the value if ready") {
+    val future: Future[Int] = Future.always(10)
+    assert(10 === future.now)
+  }
+
+  test("should continue with another future") {
+    val future: Future[Int] = Future.always(10)
+    val continueWith: Future[Int] = future.continueWith((eventualInt: Future[Int]) => 11)
+    assert(11 === Await.result(continueWith, 0 nanos))
   }
 
   test("CancellationTokenSource should allow stopping the computation") {

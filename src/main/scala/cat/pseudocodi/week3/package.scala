@@ -1,3 +1,6 @@
+import java.util.NoSuchElementException
+import java.util.concurrent.TimeoutException
+
 import scala.collection.immutable.Nil
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
@@ -99,8 +102,17 @@ package object nodescala {
       * It is thus non-blocking.
       * However, it is also non-deterministic -- it may throw or return a value
       * depending on the current state of the `Future`.
+      *
+      * hint - use Await.result to implement this. What should be the timeout?
       */
-    def now: T = ???
+    def now: T = {
+      try {
+        Await.result(f, 0 seconds)
+      }
+      catch {
+        case t: TimeoutException => throw new NoSuchElementException
+      }
+    }
 
     /** Continues the computation of this future by taking the current future
       * and mapping it into another future.
@@ -108,7 +120,13 @@ package object nodescala {
       * The function `cont` is called only after the current future completes.
       * The resulting future contains a value returned by `cont`.
       */
-    def continueWith[S](cont: Future[T] => S): Future[S] = ???
+    def continueWith[S](cont: Future[T] => S): Future[S] = {
+      val promise: Promise[S] = Promise[S]()
+      f onSuccess {
+        case result => promise.complete(Try[S](cont(f)))
+      }
+      promise.future
+    }
 
     /** Continues the computation of this future by taking the result
       * of the current future and mapping it into another future.
