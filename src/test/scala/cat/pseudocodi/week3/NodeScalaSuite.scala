@@ -76,6 +76,27 @@ class NodeScalaSuite extends FunSuite {
     Await.ready(any, 1 second)
   }
 
+  test("should delay") {
+    val delay: Future[Unit] = Future.delay(3 seconds)
+    delay onSuccess {
+      case e => assert(delay.isCompleted)
+    }
+    delay onFailure {
+      case _ => fail("Should have completed")
+    }
+    Await.result(delay, 3 seconds)
+  }
+
+  test("should fail as delay is not enough") {
+    val delay: Future[Unit] = Future.delay(3 seconds)
+    try {
+      Await.result(delay, 1 seconds)
+      assert(false)
+    } catch {
+      case t: TimeoutException => // ok!
+    }
+  }
+
   test("CancellationTokenSource should allow stopping the computation") {
     val cts = CancellationTokenSource()
     val ct = cts.cancellationToken
