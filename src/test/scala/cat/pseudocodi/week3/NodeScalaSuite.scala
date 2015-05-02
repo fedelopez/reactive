@@ -10,6 +10,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
 import scala.concurrent.duration._
 import scala.language.postfixOps
+import scala.util.Try
 
 class NodeScalaSuite extends FunSuite {
 
@@ -30,7 +31,7 @@ class NodeScalaSuite extends FunSuite {
 
   test("should return the future holding the list of values of all the futures from the list") {
     val all: Future[List[Int]] = Future.all(List(Future.always(1), Future.always(3)))
-    val result: List[Int] = Await.result(all, 0 nanos)
+    val result: List[Int] = Await.result(all, 1 second)
     assert(result == List(1, 3))
   }
 
@@ -84,7 +85,7 @@ class NodeScalaSuite extends FunSuite {
     delay onFailure {
       case _ => fail("Should have completed")
     }
-    Await.result(delay, 3 seconds)
+    Await.result(delay, 4 seconds)
   }
 
   test("should fail as delay is not enough") {
@@ -119,9 +120,29 @@ class NodeScalaSuite extends FunSuite {
   }
 
   test("should continue with another future") {
+    val futureA: Future[Int] = Future.always(10)
+    val futureB = (f: Future[Int]) => 11
+    val continueWith: Future[Int] = futureA.continueWith(futureB)
+    assert(11 === Await.result(continueWith, 1 second))
+  }
+
+  test("continueWith should wait for the first future to complete") {
+    val delay = Future.delay(1 second)
+    val always = (f: Future[Unit]) => 42
+
+    try {
+      Await.result(delay.continueWith(always), 500 millis)
+      assert(false)
+    }
+    catch {
+      case t: TimeoutException => // ok
+    }
+  }
+
+  test("should continue with another function") {
     val future: Future[Int] = Future.always(10)
-    val continueWith: Future[Int] = future.continueWith((eventualInt: Future[Int]) => 11)
-    assert(11 === Await.result(continueWith, 0 nanos))
+    val continue: Future[Int] = future.continue((res: Try[Int]) => res.get + 1)
+    assert(11 === Await.result(continue, 1 second))
   }
 
   test("CancellationTokenSource should allow stopping the computation") {
@@ -133,12 +154,29 @@ class NodeScalaSuite extends FunSuite {
       while (ct.nonCancelled) {
         // do work
       }
-
       p.success("done")
     }
 
     cts.unsubscribe()
-    assert(Await.result(p.future, 1 second) == "done")
+    assert("done" === Await.result(p.future, 1 second))
+  }
+
+  test("run should allow stopping the computation") {
+    val p = Promise[String]()
+
+    val subscription = Future.run() { ct =>
+      Future {
+        while (ct.nonCancelled) {
+          //do work
+        }
+        p.success("done")
+      }
+    }
+    Future.delay(1 second) onSuccess {
+      case _ =>
+        subscription.unsubscribe()
+    }
+    assert("done" === Await.result(p.future, 3 seconds))
   }
 
   class DummyExchange(val request: Request) extends Exchange {

@@ -1,6 +1,7 @@
 import java.util.NoSuchElementException
 import java.util.concurrent.TimeoutException
 
+import scala.async.Async.async
 import scala.collection.immutable.Nil
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
@@ -73,8 +74,14 @@ package object nodescala {
 
     /** Returns a future with a unit value that is completed after time `t`.
       */
-    def delay(t: Duration): Future[Unit] = Future {
-      Thread sleep t.toMillis
+    def delay(t: Duration): Future[Unit] = async {
+      val promise = Promise[Unit]()
+      try {
+        Await.result(Future.never, t)
+      } catch {
+        case t: TimeoutException => promise.success()
+      }
+      promise.future
     }
 
     /** Completes this future with user input.
@@ -87,7 +94,12 @@ package object nodescala {
 
     /** Creates a cancellable context for an execution and runs it.
       */
-    def run()(f: CancellationToken => Future[Unit]): Subscription = ???
+    def run()(f: CancellationToken => Future[Unit]): Subscription = {
+      val cts = CancellationTokenSource()
+      val ct = cts.cancellationToken
+      f(ct)
+      cts
+    }
 
   }
 
@@ -134,7 +146,13 @@ package object nodescala {
       * The function `cont` is called only after the current future completes.
       * The resulting future contains a value returned by `cont`.
       */
-    def continue[S](cont: Try[T] => S): Future[S] = ???
+    def continue[S](cont: Try[T] => S): Future[S] = {
+      val promise: Promise[S] = Promise[S]()
+      f onSuccess {
+        case result => promise.complete(Try[S](cont(Try[T](result))))
+      }
+      promise.future
+    }
 
   }
 

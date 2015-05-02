@@ -1,19 +1,22 @@
 package cat.pseudocodi.week1
 
 import cat.pseudocodi.week1.Generators._
-import org.scalatest.FunSuite
+import org.scalatest.exceptions.TestFailedException
+import org.scalatest.{FlatSpec, Matchers}
 
-class GeneratorsSuite extends FunSuite {
+class GeneratorsSuite extends FlatSpec with Matchers {
 
-  test("generators") {
+  "A generator" should "generate triangles" in {
     println(triangles(20).generate)
     println(lists.generate)
     println(trees.generate)
   }
 
-  test("example of a failing generator") {
-    check(pairs(lists, lists)) {
-      case (xs, ys) => (xs ::: ys).length > xs.length
+  "An exception" should "be thrown by a failing generator" in {
+    a[TestFailedException] should be thrownBy {
+      check(pairs(lists, lists)) {
+        case (xs, ys) => (xs ::: ys).length > xs.length
+      }
     }
   }
 
@@ -24,6 +27,4 @@ class GeneratorsSuite extends FunSuite {
     }
     println("Test passed " + noTimes + " times")
   }
-
-
 }
