@@ -139,6 +139,14 @@ class NodeScalaSuite extends FunSuite {
     }
   }
 
+  test("delay should continue with string") {
+    val timeOut: Future[String] = Future.delay(1 second) continueWith {
+      f => "Server timeout!"
+    }
+    val result: String = Await.result(timeOut, 2 seconds)
+    assert(result === "Server timeout!")
+  }
+
   test("should continue with another function") {
     val future: Future[Int] = Future.always(10)
     val continue: Future[Int] = future.continue((res: Try[Int]) => res.get + 1)

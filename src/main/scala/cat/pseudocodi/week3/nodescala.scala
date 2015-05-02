@@ -59,7 +59,7 @@ trait NodeScala {
           request onComplete {
             case tuple => Future {
               respond(tuple.get._2, ct, handler(tuple.get._1))
-              p.success("Done request: " + tuple.get._1)
+              p.success("Done request")
             }
           }
           p.future.onComplete {
