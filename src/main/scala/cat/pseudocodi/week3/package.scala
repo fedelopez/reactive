@@ -80,7 +80,7 @@ package object nodescala {
         try {
           Await.result(Future.never, t)
         } catch {
-          case t: TimeoutException => promise.success()
+          case t: TimeoutException => promise.complete(Try[Unit](()))
         }
       }
       promise.future

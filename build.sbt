@@ -2,7 +2,11 @@ name := "reactive"
 
 version := "1.0.0"
 
-scalaVersion := "2.11.4"
+scalaVersion := "2.11.5"
+
+scalacOptions ++= Seq("-deprecation", "-feature")
+
+(fork in Test) := false
 
 libraryDependencies += "org.scalatest" % "scalatest_2.11" % "2.2.1" % "test"
 
