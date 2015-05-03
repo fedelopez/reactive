@@ -54,16 +54,9 @@ trait NodeScala {
     val subscription = Future.run() { ct =>
       Future {
         while (ct.nonCancelled) {
-          val p = Promise[String]()
           val request: Future[(Request, Exchange)] = listener.nextRequest()
-          request onComplete {
-            case tuple => Future {
-              respond(tuple.get._2, ct, handler(tuple.get._1))
-              p.success("Done request")
-            }
-          }
-          p.future.onComplete {
-            case res => println(res)
+          request continueWith {
+            future => respond(future.now._2, ct, handler(future.now._1))
           }
         }
       }
