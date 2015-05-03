@@ -64,7 +64,7 @@ package object nodescala {
       val promise: Promise[T] = Promise[T]()
       fs.foreach((future: Future[T]) => {
         future.map {
-          value => promise.tryComplete(Try[T](value))
+          value => promise.trySuccess(value)
         } recover {
           case e => promise.tryFailure(e)
         }
@@ -76,10 +76,12 @@ package object nodescala {
       */
     def delay(t: Duration): Future[Unit] = async {
       val promise = Promise[Unit]()
-      try {
-        Await.result(Future.never, t)
-      } catch {
-        case t: TimeoutException => promise.success()
+      blocking {
+        try {
+          Await.result(Future.never, t)
+        } catch {
+          case t: TimeoutException => promise.success()
+        }
       }
       promise.future
     }
@@ -149,7 +151,7 @@ package object nodescala {
     def continue[S](cont: Try[T] => S): Future[S] = {
       val promise: Promise[S] = Promise[S]()
       f onSuccess {
-        case result => promise.complete(Try[S](cont(Try[T](result))))
+        case result => promise.success(cont(Try[T](result)))
       }
       promise.future
     }
