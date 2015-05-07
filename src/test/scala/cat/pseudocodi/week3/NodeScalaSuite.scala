@@ -139,6 +139,19 @@ class NodeScalaSuite extends FunSuite {
     }
   }
 
+  test("continueWith should handle exceptions thrown by the user specified continuation function") {
+    val delay = Future.delay(1 second)
+    val always = (f: Future[Unit]) => throw new IllegalStateException("Doh!")
+
+    try {
+      Await.result(delay.continueWith(always), 500 millis)
+      assert(false)
+    }
+    catch {
+      case t: IllegalStateException => // ok
+    }
+  }
+
   test("delay should continue with string") {
     val timeOut: Future[String] = Future.delay(1 second) continueWith {
       f => "Server timeout!"

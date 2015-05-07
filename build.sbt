@@ -19,3 +19,11 @@ libraryDependencies += "io.reactivex" %% "rxscala" % "0.23.0"
 libraryDependencies += "org.scala-lang.modules" %% "scala-swing" % "1.0.1"
 
 libraryDependencies += "io.reactivex" % "rxswing" % "0.21.0"
+
+libraryDependencies += "org.json4s" %% "json4s-native" % "3.2.11"
+
+libraryDependencies += "net.databinder.dispatch" %% "dispatch-core" % "0.11.0"
+
+libraryDependencies += "org.scala-lang" % "scala-reflect" % scalaVersion.value
+
+libraryDependencies += "com.squareup.retrofit" % "retrofit" % "1.0.0"
