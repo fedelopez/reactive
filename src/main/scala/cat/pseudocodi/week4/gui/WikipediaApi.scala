@@ -6,7 +6,7 @@ import rx.lang.scala.Observable
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
 import scala.language.postfixOps
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 trait WikipediaApi {
 
@@ -45,7 +45,11 @@ trait WikipediaApi {
       *
       * E.g. `1, 2, 3, !Exception!` should become `Success(1), Success(2), Success(3), Failure(Exception), !TerminateStream!`
       */
-    def recovered: Observable[Try[T]] = ???
+    def recovered: Observable[Try[T]] = {
+      obs.map((value: T) => {
+        Success(value)
+      }).onErrorReturn(Failure(_))
+    }
 
     /** Emits the events from the `obs` observable, until `totalSec` seconds have elapsed.
       *

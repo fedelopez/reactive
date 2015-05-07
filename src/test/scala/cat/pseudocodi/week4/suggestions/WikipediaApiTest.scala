@@ -7,7 +7,7 @@ import rx.lang.scala._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
 import scala.language.postfixOps
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 class WikipediaApiTest extends FunSuite {
 
@@ -43,6 +43,36 @@ class WikipediaApiTest extends FunSuite {
       () => completed = true
     )
     assert(completed && count == 3, "completed: " + completed + ", event count: " + count)
+  }
+
+  test("WikipediaApi should recover with try") {
+    val obs = Observable.just(0, 1, 2, 3)
+    val recovered: Observable[Try[Any]] = obs.recovered
+    var completed = 0
+
+    recovered.subscribe((value: Try[Any]) => {
+      assert(Success(completed) === value)
+      completed = completed + 1
+    }, (t: Throwable) => fail(s"stream error $t"))
+
+    assert(completed === 4)
+  }
+
+  test("WikipediaApi should recover with fail") {
+    val obs: Observable[Int] = Observable.just(0, 1, 2, 3).map((i: Int) => if (i != 3) i else i / 0)
+    val recovered: Observable[Try[Int]] = obs.recovered
+    var completed = 0
+
+    recovered.subscribe((value) => {
+      if (completed != 3) {
+        assert(Success(completed) === value)
+      } else {
+        assert(value.isFailure)
+      }
+      completed = completed + 1
+    }, (t: Throwable) => fail(s"stream error $t"))
+
+    assert(completed === 4)
   }
 
   test("WikipediaApi should correctly use concatRecovered") {
