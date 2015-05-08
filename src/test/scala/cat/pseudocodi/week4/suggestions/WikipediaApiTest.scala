@@ -6,8 +6,10 @@ import rx.lang.scala._
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
+import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.util.{Failure, Success, Try}
+
 
 class WikipediaApiTest extends FunSuite {
 
@@ -73,6 +75,33 @@ class WikipediaApiTest extends FunSuite {
     }, (t: Throwable) => fail(s"stream error $t"))
 
     assert(completed === 4)
+  }
+
+  test("WikipediaApi should not timeout") {
+    val obs: Observable[Int] = Observable.just(0).delay(1 second)
+
+    val promise: Promise[Boolean] = Promise[Boolean]()
+
+    obs.timedOut(2).subscribe((value) => {
+      promise.complete(Try(true))
+    }, (t: Throwable) => fail(s"stream error $t"))
+
+    val result: Boolean = Await.result(promise.future, 2 seconds)
+    assert(result)
+  }
+
+  test("WikipediaApi should timeout") {
+    val obs: Observable[Long] = Observable.interval(1 second)
+
+    var ticks = 0
+
+    obs.timedOut(3).subscribe((value) => {
+      ticks = ticks + 1
+    }, (t: Throwable) => fail(s"stream error $t"))
+
+    Thread.sleep(5000)
+
+    assert(2 === ticks)
   }
 
   test("WikipediaApi should correctly use concatRecovered") {

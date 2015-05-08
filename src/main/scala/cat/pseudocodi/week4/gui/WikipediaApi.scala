@@ -1,10 +1,13 @@
 package cat.pseudocodi.week4.gui
 
+import java.util.concurrent.TimeUnit
+
 import cat.pseudocodi.week4.observablex.ObservableEx
 import rx.lang.scala.Observable
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
+import scala.concurrent.duration.Duration
 import scala.language.postfixOps
 import scala.util.{Failure, Success, Try}
 
@@ -57,7 +60,9 @@ trait WikipediaApi {
       *
       * Note: uses the existing combinators on observables.
       */
-    def timedOut(totalSec: Long): Observable[T] = ???
+    def timedOut(totalSec: Long): Observable[T] = {
+      obs.take(Duration.create(totalSec, TimeUnit.SECONDS))
+    }
 
     /** Given a stream of events `obs` and a method `requestMethod` to map a request `T` into
       * a stream of responses `S`, returns a stream of all the responses wrapped into a `Try`.
@@ -84,7 +89,9 @@ trait WikipediaApi {
       *
       * Observable(Success(1), Succeess(1), Succeess(1), Succeess(2), Succeess(2), Succeess(2), Succeess(3), Succeess(3), Succeess(3))
       */
-    def concatRecovered[S](requestMethod: T => Observable[S]): Observable[Try[S]] = ???
+    def concatRecovered[S](requestMethod: T => Observable[S]): Observable[Try[S]] = {
+      obs.concatMap((value: T) => requestMethod(value).recovered)
+    }
 
   }
 
