@@ -31,7 +31,7 @@ object WikipediaSuggest extends SimpleSwingApplication with ConcreteSwingApi wit
     minimumSize = new Dimension(900, 600)
 
     val button = new Button("Get") {
-      icon = new javax.swing.ImageIcon(javax.imageio.ImageIO.read(this.getClass.getResourceAsStream("/suggestions/wiki-icon.png")))
+      icon = new javax.swing.ImageIcon(javax.imageio.ImageIO.read(this.getClass.getResourceAsStream("/cat/pseudocodi/week4/suggestions/wiki-icon.png")))
     }
     val searchTermField = new TextField
     val suggestionList = new ListView(ListBuffer[String]())
@@ -79,27 +79,34 @@ object WikipediaSuggest extends SimpleSwingApplication with ConcreteSwingApi wit
      */
 
     // TO IMPLEMENT
-    val searchTerms: Observable[String] = ???
+    val searchTerms: Observable[String] = new TextFieldOps(searchTermField).textValues
 
     // TO IMPLEMENT
-    val suggestions: Observable[Try[List[String]]] = ???
+    val suggestions: Observable[Try[List[String]]] = searchTerms.concatRecovered((term: String) => {
+      wikiSuggestResponseStream(term)
+    })
 
     // TO IMPLEMENT
     val suggestionSubscription: Subscription = suggestions.observeOn(eventScheduler) subscribe {
-      x => ???
+      x =>
+        if (x.isFailure) status.text = x.failed.get.getLocalizedMessage
+        else suggestionList.listData = x.get
     }
 
     // TO IMPLEMENT
-    val selections: Observable[String] = ???
+    val selections: Observable[String] = new ButtonOps(button).clicks.map(_ => suggestionList.selection.items.head)
 
     // TO IMPLEMENT
-    val pages: Observable[Try[String]] = ???
+    val pages: Observable[Try[String]] = selections.concatRecovered((page: String) => {
+      wikiPageResponseStream(page)
+    })
 
     // TO IMPLEMENT
     val pageSubscription: Subscription = pages.observeOn(eventScheduler) subscribe {
-      x => ???
+      x =>
+        if (x.isFailure) status.text = x.failed.get.getLocalizedMessage
+        else editorpane.text = x.get
     }
-
   }
 
 }

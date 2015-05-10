@@ -99,9 +99,9 @@ class WikipediaApiTest extends FunSuite {
       ticks = ticks + 1
     }, (t: Throwable) => fail(s"stream error $t"))
 
-    Thread.sleep(5000)
+    Observable.timer(5 seconds).toBlocking.first
 
-    assert(2 === ticks)
+    assert(ticks > 1 && ticks < 4)
   }
 
   test("WikipediaApi should correctly use concatRecovered") {
