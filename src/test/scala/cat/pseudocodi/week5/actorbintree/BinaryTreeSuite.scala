@@ -57,6 +57,15 @@ class BinaryTreeSuite(_system: ActorSystem) extends TestKit(_system) with FunSui
     expectMsg(ContainsResult(3, true))
   }
 
+  test("insert when already exists should return OperationFinished") {
+    val topNode = system.actorOf(Props[BinaryTreeSet])
+
+    topNode ! Insert(testActor, id = 301, elem = 1)
+    topNode ! Insert(testActor, id = 302, elem = 1)
+    expectMsg(OperationFinished(301))
+    expectMsg(OperationFinished(302))
+  }
+
   test("instruction example") {
     val requester = TestProbe()
     val requesterRef = requester.ref

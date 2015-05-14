@@ -56,6 +56,7 @@ class BinaryTreeSet extends Actor {
 
   import BinaryTreeSet._
 
+
   def createRoot: ActorRef = context.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true))
 
   var root = createRoot
@@ -69,9 +70,10 @@ class BinaryTreeSet extends Actor {
   // optional
   /** Accepts `Operation` and `GC` messages. */
   val normal: Receive = {
-    case _ => ???
+    case Contains(requester, id, value) => root ! Contains(requester, id, value)
+    case Insert(requester, id, value) => root ! Insert(requester, id, value)
+    case Remove(requester, id, value) => root ! Remove(requester, id, value)
   }
-
   // optional
   /** Handles messages while garbage collection is performed.
     * `newRoot` is the root of the new binary tree where we want to copy
@@ -99,6 +101,7 @@ object BinaryTreeNode {
 class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
 
   import BinaryTreeNode._
+  import BinaryTreeSet._
 
   var subtrees = Map[Position, ActorRef]()
   var removed = initiallyRemoved
@@ -109,8 +112,51 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
   // optional
   /** Handles `Operation` messages and `CopyTo` requests. */
   val normal: Receive = {
-    case _ => ???
+    case Contains(requester, id, value) => doContains(Contains(requester, id, value))
+    case Remove(requester, id, value) => doRemove(Remove(requester, id, value))
+    case Insert(requester, id, value) => doInsert(Insert(requester, id, value))
   }
+
+  def doContains(message: Contains) = {
+    if (message.elem == elem && !removed) {
+      message.requester ! ContainsResult(message.id, result = true)
+    } else {
+      if (message.elem < elem && subtrees.contains(Left)) subtrees.get(Left).get ! message
+      else if (message.elem > elem && subtrees.contains(Right)) subtrees.get(Right).get ! message
+      else message.requester ! ContainsResult(message.id, result = false)
+    }
+  }
+
+  def doRemove(message: Remove) = {
+    if (message.elem == elem && !removed) {
+      removed = true
+      message.requester ! OperationFinished(message.id)
+    } else {
+      if (message.elem < elem && subtrees.contains(Left)) subtrees.get(Left).get ! message
+      else if (message.elem > elem && subtrees.contains(Right)) subtrees.get(Right).get ! message
+      else message.requester ! OperationFinished(message.id)
+    }
+  }
+
+  def doInsert(message: Insert) {
+    if (message.elem < elem) {
+      if (subtrees.get(Left).isEmpty) {
+        subtrees = Map(Left -> context.actorOf(BinaryTreeNode.props(message.elem, initiallyRemoved = false)), Right -> subtrees.get(Right).orNull)
+        message.requester ! OperationFinished(message.id)
+      } else {
+        subtrees.get(Left).get ! message
+      }
+    } else if (message.elem > elem) {
+      if (subtrees.get(Right).isEmpty) {
+        subtrees = Map(Left -> subtrees.get(Left).orNull, Right -> context.actorOf(BinaryTreeNode.props(message.elem, initiallyRemoved = false)))
+        message.requester ! OperationFinished(message.id)
+      } else {
+        subtrees.get(Right).get ! message
+      }
+    } else message.requester ! OperationFinished(message.id)
+
+  }
+
 
   // optional
   /** `expected` is the set of ActorRefs whose replies we are waiting for,
