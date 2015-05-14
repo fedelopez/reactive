@@ -52,7 +52,7 @@ object BinaryTreeSet {
 
 }
 
-class BinaryTreeSet extends Actor {
+class BinaryTreeSet extends Actor with ActorLogging {
 
   import BinaryTreeSet._
 
@@ -73,13 +73,19 @@ class BinaryTreeSet extends Actor {
     case Contains(requester, id, value) => root ! Contains(requester, id, value)
     case Insert(requester, id, value) => root ! Insert(requester, id, value)
     case Remove(requester, id, value) => root ! Remove(requester, id, value)
+    case GC => log.info("Garbage collecting...")
   }
   // optional
   /** Handles messages while garbage collection is performed.
     * `newRoot` is the root of the new binary tree where we want to copy
     * all non-removed elements into.
     */
-  def garbageCollecting(newRoot: ActorRef): Receive = ???
+  def garbageCollecting(newRoot: ActorRef): Receive = {
+    case Contains(requester, id, value) => pendingQueue.enqueue(Contains(requester, id, value))
+    case Insert(requester, id, value) => pendingQueue.enqueue(Insert(requester, id, value))
+    case Remove(requester, id, value) => pendingQueue.enqueue(Remove(requester, id, value))
+    case GC => log.info("Already in GC, do nothing")
+  }
 
 }
 
@@ -98,7 +104,7 @@ object BinaryTreeNode {
   def props(elem: Int, initiallyRemoved: Boolean) = Props(classOf[BinaryTreeNode], elem, initiallyRemoved)
 }
 
-class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
+class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor with ActorLogging {
 
   import BinaryTreeNode._
   import BinaryTreeSet._
@@ -115,6 +121,7 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
     case Contains(requester, id, value) => doContains(Contains(requester, id, value))
     case Remove(requester, id, value) => doRemove(Remove(requester, id, value))
     case Insert(requester, id, value) => doInsert(Insert(requester, id, value))
+    case CopyTo(treeNode) => doCopyTo(treeNode)
   }
 
   def doContains(message: Contains) = {
@@ -139,22 +146,28 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
   }
 
   def doInsert(message: Insert) {
-    if (message.elem < elem) {
-      if (subtrees.get(Left).isEmpty) {
-        subtrees = Map(Left -> context.actorOf(BinaryTreeNode.props(message.elem, initiallyRemoved = false)), Right -> subtrees.get(Right).orNull)
-        message.requester ! OperationFinished(message.id)
-      } else {
-        subtrees.get(Left).get ! message
-      }
-    } else if (message.elem > elem) {
-      if (subtrees.get(Right).isEmpty) {
-        subtrees = Map(Left -> subtrees.get(Left).orNull, Right -> context.actorOf(BinaryTreeNode.props(message.elem, initiallyRemoved = false)))
-        message.requester ! OperationFinished(message.id)
-      } else {
-        subtrees.get(Right).get ! message
-      }
-    } else message.requester ! OperationFinished(message.id)
+    if (message.elem < elem) doInsertOnPosition(message, Left)
+    else if (message.elem > elem) doInsertOnPosition(message, Right)
+    else message.requester ! OperationFinished(message.id)
+  }
 
+  def doInsertOnPosition(message: Insert, pos: Position) = {
+    if (subtrees.get(pos).isEmpty) {
+      subtrees += pos -> context.actorOf(BinaryTreeNode.props(message.elem, initiallyRemoved = false))
+      message.requester ! OperationFinished(message.id)
+    } else {
+      subtrees.get(pos).get ! message
+    }
+  }
+
+  def doCopyTo(targetNode: ActorRef) = {
+    //    if (!removed) {
+    //      targetNode ! Insert(self, elem, elem)
+    //    }
+    //    subtrees.foreach((tuple: (Position, ActorRef)) => tuple._2 ! CopyTo(targetNode))
+    //    sender() ! CopyFinished
+    context.become(copying(Set(targetNode), insertConfirmed = true))
+    targetNode ! Insert(self, elem, elem)
   }
 
 

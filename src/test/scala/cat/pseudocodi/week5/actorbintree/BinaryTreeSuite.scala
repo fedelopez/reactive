@@ -5,6 +5,7 @@ package cat.pseudocodi.week5.actorbintree
 
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
+import cat.pseudocodi.week5.actorbintree.BinaryTreeNode.{CopyFinished, CopyTo}
 import org.scalatest.{BeforeAndAfterAll, FunSuiteLike, Matchers}
 
 import scala.concurrent.duration._
@@ -45,25 +46,42 @@ class BinaryTreeSuite(_system: ActorSystem) extends TestKit(_system) with FunSui
   }
 
   test("proper inserts and lookups") {
-    val topNode = system.actorOf(Props[BinaryTreeSet])
+    val tree = system.actorOf(Props[BinaryTreeSet])
 
-    topNode ! Contains(testActor, id = 1, 1)
-    expectMsg(ContainsResult(1, false))
+    tree ! Contains(testActor, id = 1, 1)
+    expectMsg(ContainsResult(1, result = false))
 
-    topNode ! Insert(testActor, id = 2, 1)
-    topNode ! Contains(testActor, id = 3, 1)
+    tree ! Insert(testActor, id = 2, 1)
+    tree ! Contains(testActor, id = 3, 1)
 
     expectMsg(OperationFinished(2))
-    expectMsg(ContainsResult(3, true))
+    expectMsg(ContainsResult(3, result = true))
   }
 
   test("insert when already exists should return OperationFinished") {
-    val topNode = system.actorOf(Props[BinaryTreeSet])
+    val tree = system.actorOf(Props[BinaryTreeSet])
 
-    topNode ! Insert(testActor, id = 301, elem = 1)
-    topNode ! Insert(testActor, id = 302, elem = 1)
+    tree ! Insert(testActor, id = 301, elem = 1)
+    tree ! Insert(testActor, id = 302, elem = 1)
     expectMsg(OperationFinished(301))
     expectMsg(OperationFinished(302))
+  }
+
+  test("copy singleton tree node") {
+    val treeNode = system.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true), "root")
+    val targetTreeNode = system.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true), "targetRoot")
+
+    treeNode ! Insert(testActor, id = 1, 1)
+    expectMsg(OperationFinished(id = 1))
+
+    treeNode ! Contains(testActor, id = 2, 1)
+    expectMsg(ContainsResult(2, result = true))
+
+    treeNode ! CopyTo(targetTreeNode)
+    expectMsg(CopyFinished)
+
+    targetTreeNode ! Contains(testActor, id = 3, 1)
+    expectMsg(ContainsResult(3, result = true))
   }
 
   test("instruction example") {
@@ -81,9 +99,9 @@ class BinaryTreeSuite(_system: ActorSystem) extends TestKit(_system) with FunSui
     val expectedReplies = List(
       OperationFinished(id = 10),
       OperationFinished(id = 20),
-      ContainsResult(id = 50, false),
-      ContainsResult(id = 70, true),
-      ContainsResult(id = 80, false),
+      ContainsResult(id = 50, result = false),
+      ContainsResult(id = 70, result = true),
+      ContainsResult(id = 80, result = false),
       OperationFinished(id = 100)
     )
 
