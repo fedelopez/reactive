@@ -51,14 +51,13 @@ object BinaryTreeSet {
 
 }
 
-class BinaryTreeSet extends Actor with ActorLogging with Stash {
+class BinaryTreeSet extends Actor with Stash {
 
   import BinaryTreeSet._
 
   def createRoot: ActorRef = context.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true))
 
   var root = createRoot
-  var stashCount = 0
 
   // optional
   def receive = normal
@@ -80,17 +79,10 @@ class BinaryTreeSet extends Actor with ActorLogging with Stash {
     * all non-removed elements into.
     */
   def garbageCollecting(newRoot: ActorRef): Receive = {
-    case Insert(requester, id, value) =>
-      stashCount = stashCount + 1
-      stash()
-    case Contains(requester, id, value) =>
-      stashCount = stashCount + 1
-      stash()
-    case Remove(requester, id, value) =>
-      stashCount = stashCount + 1
-      stash()
+    case Insert(requester, id, value) => stash()
+    case Contains(requester, id, value) => stash()
+    case Remove(requester, id, value) => stash()
     case CopyFinished =>
-      log.info(s"Copy finished received in tree set, stash count: $stashCount")
       root ! PoisonPill
       context.watch(root)
     case Terminated(_) =>
@@ -115,7 +107,7 @@ object BinaryTreeNode {
   def props(elem: Int, initiallyRemoved: Boolean) = Props(classOf[BinaryTreeNode], elem, initiallyRemoved)
 }
 
-class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor with ActorLogging {
+class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
 
   import BinaryTreeNode._
   import BinaryTreeSet._
