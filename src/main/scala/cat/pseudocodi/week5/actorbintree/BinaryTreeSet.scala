@@ -4,8 +4,7 @@
 package cat.pseudocodi.week5.actorbintree
 
 import akka.actor._
-
-import scala.collection.immutable.Queue
+import cat.pseudocodi.week5.actorbintree.BinaryTreeNode.{CopyFinished, CopyTo}
 
 object BinaryTreeSet {
 
@@ -52,17 +51,14 @@ object BinaryTreeSet {
 
 }
 
-class BinaryTreeSet extends Actor with ActorLogging {
+class BinaryTreeSet extends Actor with ActorLogging with Stash {
 
   import BinaryTreeSet._
-
 
   def createRoot: ActorRef = context.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true))
 
   var root = createRoot
-
-  // optional
-  var pendingQueue = Queue.empty[Operation]
+  var stashCount = 0
 
   // optional
   def receive = normal
@@ -73,7 +69,10 @@ class BinaryTreeSet extends Actor with ActorLogging {
     case Contains(requester, id, value) => root ! Contains(requester, id, value)
     case Insert(requester, id, value) => root ! Insert(requester, id, value)
     case Remove(requester, id, value) => root ! Remove(requester, id, value)
-    case GC => log.info("Garbage collecting...")
+    case GC =>
+      val newRoot = createRoot
+      context.become(garbageCollecting(newRoot))
+      root ! CopyTo(newRoot)
   }
   // optional
   /** Handles messages while garbage collection is performed.
@@ -81,12 +80,24 @@ class BinaryTreeSet extends Actor with ActorLogging {
     * all non-removed elements into.
     */
   def garbageCollecting(newRoot: ActorRef): Receive = {
-    case Contains(requester, id, value) => pendingQueue.enqueue(Contains(requester, id, value))
-    case Insert(requester, id, value) => pendingQueue.enqueue(Insert(requester, id, value))
-    case Remove(requester, id, value) => pendingQueue.enqueue(Remove(requester, id, value))
-    case GC => log.info("Already in GC, do nothing")
+    case Insert(requester, id, value) =>
+      stashCount = stashCount + 1
+      stash()
+    case Contains(requester, id, value) =>
+      stashCount = stashCount + 1
+      stash()
+    case Remove(requester, id, value) =>
+      stashCount = stashCount + 1
+      stash()
+    case CopyFinished =>
+      log.info(s"Copy finished received in tree set, stash count: $stashCount")
+      root ! PoisonPill
+      context.watch(root)
+    case Terminated(_) =>
+      root = newRoot
+      unstashAll()
+      context.become(normal)
   }
-
 }
 
 object BinaryTreeNode {
@@ -148,7 +159,12 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor wit
   def doInsert(message: Insert) {
     if (message.elem < elem) doInsertOnPosition(message, Left)
     else if (message.elem > elem) doInsertOnPosition(message, Right)
-    else message.requester ! OperationFinished(message.id)
+    else {
+      if (removed) {
+        removed = false
+      }
+      message.requester ! OperationFinished(message.id)
+    }
   }
 
   def doInsertOnPosition(message: Insert, pos: Position) = {
@@ -161,20 +177,32 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor wit
   }
 
   def doCopyTo(targetNode: ActorRef) = {
-    //    if (!removed) {
-    //      targetNode ! Insert(self, elem, elem)
-    //    }
-    //    subtrees.foreach((tuple: (Position, ActorRef)) => tuple._2 ! CopyTo(targetNode))
-    //    sender() ! CopyFinished
-    context.become(copying(Set(targetNode), insertConfirmed = true))
-    targetNode ! Insert(self, elem, elem)
+    var waitingCopyCount = subtrees.size
+    if (!removed) {
+      waitingCopyCount = waitingCopyCount + 1
+    }
+    context.become(copying(waitingCopyCount))
+    if (!removed) {
+      targetNode ! Insert(self, elem, elem)
+    }
+    subtrees.foreach((tuple: (Position, ActorRef)) => tuple._2 ! CopyTo(targetNode))
   }
-
 
   // optional
   /** `expected` is the set of ActorRefs whose replies we are waiting for,
     * `insertConfirmed` tracks whether the copy of this node to the new tree has been confirmed.
     */
-  def copying(expected: Set[ActorRef], insertConfirmed: Boolean): Receive = ???
+  def copying(nodesToCopyCount: Int): Receive = {
+    case OperationFinished(_) => notifyCopyFinished(nodesToCopyCount)
+    case CopyFinished => notifyCopyFinished(nodesToCopyCount)
+  }
 
+  def notifyCopyFinished(waitingCopyFinished: Int) = {
+    val count = waitingCopyFinished - 1
+    if (count == 0) {
+      context.parent ! CopyFinished
+    } else {
+      context.become(copying(count))
+    }
+  }
 }

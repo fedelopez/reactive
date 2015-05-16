@@ -5,7 +5,6 @@ package cat.pseudocodi.week5.actorbintree
 
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
-import cat.pseudocodi.week5.actorbintree.BinaryTreeNode.{CopyFinished, CopyTo}
 import org.scalatest.{BeforeAndAfterAll, FunSuiteLike, Matchers}
 
 import scala.concurrent.duration._
@@ -67,21 +66,29 @@ class BinaryTreeSuite(_system: ActorSystem) extends TestKit(_system) with FunSui
     expectMsg(OperationFinished(302))
   }
 
-  test("copy singleton tree node") {
-    val treeNode = system.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true), "root")
-    val targetTreeNode = system.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true), "targetRoot")
+  test("insert zero") {
+    val tree = system.actorOf(Props[BinaryTreeSet])
 
-    treeNode ! Insert(testActor, id = 1, 1)
-    expectMsg(OperationFinished(id = 1))
+    tree ! Insert(testActor, id = 1, elem = 0)
+    expectMsg(OperationFinished(1))
 
-    treeNode ! Contains(testActor, id = 2, 1)
+    tree ! Contains(testActor, id = 2, elem = 0)
     expectMsg(ContainsResult(2, result = true))
+  }
 
-    treeNode ! CopyTo(targetTreeNode)
-    expectMsg(CopyFinished)
+  test("copy singleton tree node") {
+    val tree = system.actorOf(Props[BinaryTreeSet])
 
-    targetTreeNode ! Contains(testActor, id = 3, 1)
-    expectMsg(ContainsResult(3, result = true))
+    tree ! Insert(testActor, id = 0, 1)
+    expectMsg(OperationFinished(id = 0))
+
+    tree ! Contains(testActor, id = 1, 1)
+    expectMsg(ContainsResult(1, result = true))
+
+    tree ! GC
+    tree ! GC
+    tree ! Contains(testActor, id = 100, 1)
+    expectMsg(ContainsResult(100, result = true))
   }
 
   test("instruction example") {
