@@ -87,6 +87,7 @@ class BinaryTreeSet extends Actor with Stash {
       root ! PoisonPill
     case Terminated(_) =>
       root = newRoot
+      context.watch(root)
       unstashAll()
       context.become(normal)
   }
