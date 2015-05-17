@@ -58,6 +58,7 @@ class BinaryTreeSet extends Actor with Stash {
   def createRoot: ActorRef = context.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true))
 
   var root = createRoot
+  context.watch(root)
 
   // optional
   def receive = normal
@@ -84,7 +85,6 @@ class BinaryTreeSet extends Actor with Stash {
     case Remove(requester, id, value) => stash()
     case CopyFinished =>
       root ! PoisonPill
-      context.watch(root)
     case Terminated(_) =>
       root = newRoot
       unstashAll()
