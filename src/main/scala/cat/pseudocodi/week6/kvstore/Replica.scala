@@ -1,7 +1,6 @@
 package cat.pseudocodi.week6.kvstore
 
 import akka.actor.{Actor, ActorRef, Props}
-import cat.pseudocodi.week6.kvstore.Arbiter._
 
 object Replica {
 
@@ -30,6 +29,9 @@ object Replica {
 
 class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
+  import cat.pseudocodi.week6.kvstore.Arbiter._
+  import cat.pseudocodi.week6.kvstore.Replica._
+
   /*
    * The contents of this actor is just a suggestion, you can implement it in any way you like.
    */
@@ -40,6 +42,9 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   // the current set of replicators
   var replicators = Set.empty[ActorRef]
 
+  override def preStart(): scala.Unit = {
+    arbiter ! Join
+  }
 
   def receive = {
     case JoinedPrimary => context.become(leader)
@@ -48,12 +53,14 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   /* TODO Behavior for  the leader role. */
   val leader: Receive = {
-    case _ =>
+    case Insert(key, value, id) => ()
+    case Remove(key, id) => ()
+    case Get(key, id) => ()
   }
 
   /* TODO Behavior for the replica role. */
   val replica: Receive = {
-    case _ =>
+    case Get(key, id) => ()
   }
 
 }
