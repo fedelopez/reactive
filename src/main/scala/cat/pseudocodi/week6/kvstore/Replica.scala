@@ -43,6 +43,8 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   // the current set of replicators
   var replicators = Set.empty[ActorRef]
 
+  var sequence = 0
+
   override def preStart(): scala.Unit = {
     arbiter ! Join
   }
@@ -67,9 +69,13 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   /* TODO Behavior for the replica role. */
   val replica: Receive = {
     case Snapshot(key, value, seq) =>
-      if (value.isEmpty) kv -= key
-      else kv += key -> value.get
-      sender() ! SnapshotAck(key, seq)
+      if (seq < sequence) sender() ! SnapshotAck(key, seq)
+      else {
+        if (value.isEmpty) kv -= key
+        else kv += key -> value.get
+        sequence += 1
+        sender() ! SnapshotAck(key, seq)
+      }
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
   }
