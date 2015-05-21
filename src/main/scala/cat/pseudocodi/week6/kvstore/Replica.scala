@@ -31,6 +31,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   import cat.pseudocodi.week6.kvstore.Arbiter._
   import cat.pseudocodi.week6.kvstore.Replica._
+  import cat.pseudocodi.week6.kvstore.Replicator._
 
   /*
    * The contents of this actor is just a suggestion, you can implement it in any way you like.
@@ -53,14 +54,24 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   /* TODO Behavior for  the leader role. */
   val leader: Receive = {
-    case Insert(key, value, id) => ()
-    case Remove(key, id) => ()
-    case Get(key, id) => ()
+    case Insert(key, value, id) =>
+      kv += key -> value
+      sender() ! OperationAck(id)
+    case Remove(key, id) =>
+      kv -= key
+      sender() ! OperationAck(id)
+    case Get(key, id) =>
+      sender() ! GetResult(key, kv.get(key), id)
   }
 
   /* TODO Behavior for the replica role. */
   val replica: Receive = {
-    case Get(key, id) => ()
+    case Snapshot(key, value, seq) =>
+      if (value.isEmpty) kv -= key
+      else kv += key -> value.get
+      sender() ! SnapshotAck(key, seq)
+    case Get(key, id) =>
+      sender() ! GetResult(key, kv.get(key), id)
   }
 
 }
