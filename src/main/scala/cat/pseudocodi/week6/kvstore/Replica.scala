@@ -30,8 +30,10 @@ object Replica {
 class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   import cat.pseudocodi.week6.kvstore.Arbiter._
+  import cat.pseudocodi.week6.kvstore.Persistence._
   import cat.pseudocodi.week6.kvstore.Replica._
   import cat.pseudocodi.week6.kvstore.Replicator._
+
 
   /*
    * The contents of this actor is just a suggestion, you can implement it in any way you like.
@@ -44,6 +46,8 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   var replicators = Set.empty[ActorRef]
 
   var sequence = 0
+  var persistence: ActorRef = context.actorOf(persistenceProps)
+  var keyToReplicator = Map.empty[String, ActorRef]
 
   override def preStart(): scala.Unit = {
     arbiter ! Join
@@ -54,7 +58,6 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case JoinedSecondary => context.become(replica)
   }
 
-  /* TODO Behavior for  the leader role. */
   val leader: Receive = {
     case Insert(key, value, id) =>
       kv += key -> value
@@ -66,7 +69,6 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       sender() ! GetResult(key, kv.get(key), id)
   }
 
-  /* TODO Behavior for the replica role. */
   val replica: Receive = {
     case Snapshot(key, value, seq) =>
       if (seq > sequence) () // ignore, not yet ready for that
@@ -74,11 +76,14 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       else {
         if (value.isEmpty) kv -= key
         else kv += key -> value.get
-        sequence += 1
-        sender() ! SnapshotAck(key, seq)
+        keyToReplicator += key -> sender()
+        persistence ! Persist(key, value, seq)
       }
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
+    case Persisted(key, id) =>
+      keyToReplicator.get(key).foreach((ref: ActorRef) => ref ! SnapshotAck(key, sequence))
+      sequence += 1
   }
 
 }

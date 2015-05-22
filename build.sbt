@@ -6,7 +6,7 @@ scalaVersion := "2.11.5"
 
 scalacOptions ++= Seq("-deprecation", "-feature")
 
-(fork in Test) := false
+(fork in Test) := true
 
 libraryDependencies ++= Seq(
   "org.scalatest" % "scalatest_2.11" % "2.2.1" % "test",

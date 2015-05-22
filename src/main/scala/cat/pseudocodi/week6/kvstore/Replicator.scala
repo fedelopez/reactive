@@ -1,6 +1,6 @@
 package cat.pseudocodi.week6.kvstore
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor._
 
 object Replicator {
 
@@ -18,6 +18,9 @@ object Replicator {
 class Replicator(val replica: ActorRef) extends Actor {
 
   import Replicator._
+  import context.dispatcher
+
+  import scala.concurrent.duration._
 
   /*
    * The contents of this actor is just a suggestion, you can implement it in any way you like.
@@ -28,6 +31,8 @@ class Replicator(val replica: ActorRef) extends Actor {
   // a sequence of not-yet-sent snapshots (you can disregard this if not implementing batching)
   var pending = Vector.empty[Snapshot]
 
+  var ticks = Map.empty[String, (ActorRef, Cancellable)]
+
   var _seqCounter = 0L
 
   def nextSeq = {
@@ -36,10 +41,17 @@ class Replicator(val replica: ActorRef) extends Actor {
     ret
   }
 
-
-  /* TODO Behavior for the Replicator. */
   def receive: Receive = {
-    case _ =>
+    case Replicate(key, valueOption, seq) =>
+      val msg: Snapshot = Snapshot(key, valueOption, nextSeq)
+      val cancellable: Cancellable = context.system.scheduler.schedule(0.milliseconds, 100.milliseconds, replica, msg)
+      ticks += key ->(sender(), cancellable)
+    case SnapshotAck(key, seq) =>
+      ticks.get(key).foreach((tuple: (ActorRef, Cancellable)) => {
+        tuple._2.cancel()
+        tuple._1 ! Replicated(key, seq)
+      })
+      ticks -= key
   }
 
 }
