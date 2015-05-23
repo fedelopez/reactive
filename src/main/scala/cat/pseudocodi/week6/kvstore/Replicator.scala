@@ -44,7 +44,7 @@ class Replicator(val replica: ActorRef) extends Actor {
   def receive: Receive = {
     case Replicate(key, valueOption, seq) =>
       val msg: Snapshot = Snapshot(key, valueOption, nextSeq)
-      val cancellable: Cancellable = context.system.scheduler.schedule(0.milliseconds, 100.milliseconds, replica, msg)
+      val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, replica, msg)
       ticks += key ->(sender(), cancellable)
     case SnapshotAck(key, seq) =>
       ticks.get(key).foreach((tuple: (ActorRef, Cancellable)) => {
