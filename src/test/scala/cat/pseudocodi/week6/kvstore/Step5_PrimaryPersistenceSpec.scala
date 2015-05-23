@@ -78,6 +78,7 @@ with Tools {
     client.waitFailed(setId)
   }
 
+  //todo
   test("case4: Primary generates failure after 1 second if global acknowledgement fails") {
     val arbiter = TestProbe()
     val persistence = TestProbe()
@@ -96,6 +97,7 @@ with Tools {
     }
   }
 
+  //todo
   test("case5: Primary acknowledges only after persistence and global acknowledgement") {
     val arbiter = TestProbe()
     val persistence = TestProbe()

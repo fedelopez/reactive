@@ -37,11 +37,6 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   import scala.concurrent.duration._
 
-
-  /*
-   * The contents of this actor is just a suggestion, you can implement it in any way you like.
-   */
-
   var kv = Map.empty[String, String]
   // a map from secondary replicas to replicators
   var secondaries = Map.empty[ActorRef, ActorRef]
@@ -81,9 +76,11 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
         }
       }
       keyToReplicator += key ->(sender(), cancellable)
+      forwardKeyValuesToReplicators()
     case Remove(key, id) =>
       kv -= key
       sender() ! OperationAck(id)
+      forwardDeleteKeyToReplicators(key)
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
     case Persisted(key, id) =>
@@ -94,7 +91,13 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       keyToCount -= key
       keyToReplicator -= key
     case Replicas(replicas) =>
-
+      secondaries.filter((tuple: (ActorRef, ActorRef)) => !replicas.contains(tuple._2)).foreach((tuple: (ActorRef, ActorRef)) => {
+        tuple._1 ! PoisonPill
+        tuple._2 ! PoisonPill
+      })
+      secondaries = replicas.filter((ref: ActorRef) => ref != self).map((secondary: ActorRef) => secondary -> context.actorOf(Replicator.props(secondary))).toMap
+      replicators = secondaries.values.toSet
+      forwardKeyValuesToReplicators()
   }
 
   val replica: Receive = {
@@ -116,6 +119,24 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       })
       keyToReplicator -= key
       sequence += 1
+  }
+
+  def forwardKeyValuesToReplicators() = {
+    replicators.foreach((replicator: ActorRef) => {
+      var seq = 0
+      kv.foreach((tuple: (String, String)) => {
+        replicator ! Replicate(tuple._1, Option(tuple._2), seq)
+        seq += 1
+      })
+    })
+  }
+
+  def forwardDeleteKeyToReplicators(key: String) = {
+    var seq = 0
+    replicators.foreach((replicator: ActorRef) => {
+      replicator ! Replicate(key, None, seq)
+      seq += 1
+    })
   }
 
 }
