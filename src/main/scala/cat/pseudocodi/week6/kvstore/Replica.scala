@@ -1,6 +1,6 @@
 package cat.pseudocodi.week6.kvstore
 
-import akka.actor.{Actor, ActorRef, Cancellable, Props}
+import akka.actor._
 
 object Replica {
 
@@ -51,6 +51,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   var sequence = 0
   var persistence: ActorRef = context.actorOf(persistenceProps)
   var keyToReplicator = Map.empty[String, (ActorRef, Cancellable)]
+  var keyToCount = Map.empty[String, Int]
 
   override def preStart(): scala.Unit = {
     arbiter ! Join
@@ -64,12 +65,36 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   val leader: Receive = {
     case Insert(key, value, id) =>
       kv += key -> value
-      sender() ! OperationAck(id)
+      val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds) {
+        val count: Int = keyToCount.getOrElse(key, 0)
+        if (count > 9) {
+          keyToReplicator.get(key).foreach((tuple: (ActorRef, Cancellable)) => {
+            tuple._1 ! OperationFailed(id)
+            tuple._2.cancel()
+          })
+          keyToCount -= key
+          keyToReplicator -= key
+        }
+        else {
+          keyToCount += key -> (count + 1)
+          persistence ! Persist(key, Option(value), id)
+        }
+      }
+      keyToReplicator += key ->(sender(), cancellable)
     case Remove(key, id) =>
       kv -= key
       sender() ! OperationAck(id)
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
+    case Persisted(key, id) =>
+      keyToReplicator.get(key).foreach((tuple: (ActorRef, Cancellable)) => {
+        tuple._1 ! OperationAck(id)
+        tuple._2.cancel()
+      })
+      keyToCount -= key
+      keyToReplicator -= key
+    case Replicas(replicas) =>
+
   }
 
   val replica: Receive = {
@@ -79,7 +104,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       else {
         if (value.isEmpty) kv -= key
         else kv += key -> value.get
-        val cancellable: Cancellable = context.system.scheduler.schedule(0.milliseconds, 100.milliseconds, persistence, Persist(key, value, seq))
+        val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, persistence, Persist(key, value, seq))
         keyToReplicator += key ->(sender(), cancellable)
       }
     case Get(key, id) =>
