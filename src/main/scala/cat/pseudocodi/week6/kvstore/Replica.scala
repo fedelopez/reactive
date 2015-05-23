@@ -1,6 +1,6 @@
 package cat.pseudocodi.week6.kvstore
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.{Actor, ActorRef, Cancellable, Props}
 
 object Replica {
 
@@ -33,6 +33,9 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   import cat.pseudocodi.week6.kvstore.Persistence._
   import cat.pseudocodi.week6.kvstore.Replica._
   import cat.pseudocodi.week6.kvstore.Replicator._
+  import context.dispatcher
+
+  import scala.concurrent.duration._
 
 
   /*
@@ -47,7 +50,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   var sequence = 0
   var persistence: ActorRef = context.actorOf(persistenceProps)
-  var keyToReplicator = Map.empty[String, ActorRef]
+  var keyToReplicator = Map.empty[String, (ActorRef, Cancellable)]
 
   override def preStart(): scala.Unit = {
     arbiter ! Join
@@ -76,13 +79,17 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       else {
         if (value.isEmpty) kv -= key
         else kv += key -> value.get
-        keyToReplicator += key -> sender()
-        persistence ! Persist(key, value, seq)
+        val cancellable: Cancellable = context.system.scheduler.schedule(0.milliseconds, 100.milliseconds, persistence, Persist(key, value, seq))
+        keyToReplicator += key ->(sender(), cancellable)
       }
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
     case Persisted(key, id) =>
-      keyToReplicator.get(key).foreach((ref: ActorRef) => ref ! SnapshotAck(key, sequence))
+      keyToReplicator.get(key).foreach((tuple: (ActorRef, Cancellable)) => {
+        tuple._1 ! SnapshotAck(key, sequence)
+        tuple._2.cancel()
+      })
+      keyToReplicator -= key
       sequence += 1
   }
 
