@@ -8,6 +8,8 @@ object Replicator {
 
   case class Replicated(key: String, id: Long)
 
+  case class ReplicateTimeout(key: String, id: Long)
+
   case class Snapshot(key: String, valueOption: Option[String], seq: Long)
 
   case class SnapshotAck(key: String, seq: Long)

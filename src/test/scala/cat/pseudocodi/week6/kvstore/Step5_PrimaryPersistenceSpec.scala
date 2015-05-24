@@ -78,10 +78,8 @@ with Tools {
     client.waitFailed(setId)
   }
 
-  //todo
-  test("case4: Primary generates failure after 1 second if global acknowledgement fails") {
+  test("case4: Primary generates failure after 1 second if global acknowledgement fails when insert") {
     val arbiter = TestProbe()
-    val persistence = TestProbe()
     val primary = system.actorOf(Replica.props(arbiter.ref, Persistence.props(flaky = false)), "case4-primary")
     val secondary = TestProbe()
     val client = session(primary)
@@ -97,10 +95,25 @@ with Tools {
     }
   }
 
-  //todo
+  test("case4.1: Primary generates failure after 1 second if global acknowledgement fails when delete") {
+    val arbiter = TestProbe()
+    val primary = system.actorOf(Replica.props(arbiter.ref, Persistence.props(flaky = false)), "case4.1-primary")
+    val secondary = TestProbe()
+    val client = session(primary)
+
+    arbiter.expectMsg(Join)
+    arbiter.send(primary, JoinedPrimary)
+    arbiter.send(primary, Replicas(Set(primary, secondary.ref)))
+
+    client.probe.within(1.second, 2.seconds) {
+      val setId = client.remove("foo")
+      secondary.expectMsgType[Snapshot](200.millis)
+      client.waitFailed(setId)
+    }
+  }
+
   test("case5: Primary acknowledges only after persistence and global acknowledgement") {
     val arbiter = TestProbe()
-    val persistence = TestProbe()
     val primary = system.actorOf(Replica.props(arbiter.ref, Persistence.props(flaky = false)), "case5-primary")
     val secondaryA, secondaryB = TestProbe()
     val client = session(primary)
