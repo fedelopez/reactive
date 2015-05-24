@@ -143,10 +143,29 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
   def handleReplicas(replicas: Set[ActorRef]) = {
-    replicators.diff(replicas).foreach((ref: ActorRef) => ref ! PoisonPill)
+    val obsolete: Set[ActorRef] = replicators.diff(replicas)
+    removeObsoleteReplicators(obsolete)
+    obsolete.foreach((ref: ActorRef) => ref ! PoisonPill)
     replicators = replicas.filter((ref: ActorRef) => ref != self).map((secondary: ActorRef) => context.actorOf(Replicator.props(secondary)))
     forwardKeyValuesToReplicators()
   }
+
+  def removeObsoleteReplicators(obsolete: Set[ActorRef]) = {
+    var pendingReplicateStateCopy = Map.empty[UpdateKey, PendingReplicateState]
+    obsolete.foreach((ref: ActorRef) => {
+      pendingReplicated.foreach((tuple: (UpdateKey, PendingReplicateState)) => {
+        val state: PendingReplicateState = tuple._2.removeReplicator(ref)
+        if (state.replicators.nonEmpty) {
+          pendingReplicateStateCopy += tuple._1 -> state
+        }
+        if (tuple._2.replicators.contains(ref) && state.replicators.isEmpty && !pendingPersisted.contains(tuple._1)) {
+          tuple._2.sender ! OperationAck(tuple._1.id)
+        }
+      })
+    })
+    pendingReplicated = pendingReplicateStateCopy
+  }
+
 
   def handleReplicatedOK(key: String, id: Long): Unit = {
     val updateKey: UpdateKey = new UpdateKey(key, id)
