@@ -39,12 +39,11 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   import scala.concurrent.duration._
 
   var kv = Map.empty[String, String]
-  var secondaryToReplicator = Map.empty[ActorRef, ActorRef]
   var replicators = Set.empty[ActorRef]
 
   var pendingReplicated = Map.empty[UpdateKey, PendingReplicateState]
   var pendingPersisted = Map.empty[UpdateKey, ActorRef]
-  var keyToReplicator = Map.empty[UpdateKey, (ActorRef, Cancellable)]
+  var keyToSender = Map.empty[UpdateKey, (ActorRef, Cancellable)]
   var keyToCount = Map.empty[UpdateKey, Int]
 
   var sequence = 0
@@ -77,17 +76,17 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
         if (value.isEmpty) kv -= key
         else kv += key -> value.get
         val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, persistence, Persist(key, value, seq))
-        keyToReplicator += new UpdateKey(key, seq) ->(sender(), cancellable)
+        keyToSender += new UpdateKey(key, seq) ->(sender(), cancellable)
       }
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
     case Persisted(key, id) =>
       val updateKey = new UpdateKey(key, id)
-      keyToReplicator.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => {
+      keyToSender.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => {
         tuple._1 ! SnapshotAck(key, sequence)
         tuple._2.cancel()
       })
-      keyToReplicator -= updateKey
+      keyToSender -= updateKey
       sequence += 1
   }
 
@@ -103,19 +102,19 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds) {
       val count: Int = keyToCount.getOrElse(updateKey, 0)
       if (count > 9) {
-        keyToReplicator.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => {
+        keyToSender.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => {
           tuple._1 ! OperationFailed(updateKey.id)
           tuple._2.cancel()
         })
         keyToCount -= updateKey
-        keyToReplicator -= updateKey
+        keyToSender -= updateKey
       }
       else {
         keyToCount += updateKey -> (count + 1)
         persistence ! Persist(updateKey.key, value, updateKey.id)
       }
     }
-    keyToReplicator += updateKey ->(sender(), cancellable)
+    keyToSender += updateKey ->(sender(), cancellable)
   }
 
   def scheduleTimeoutForUpdate(updateKey: UpdateKey) = {
@@ -133,23 +132,19 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
   def handlePersisted(key: String, id: Long) = {
-    val updateKey: UpdateKey = new UpdateKey(key, id)
+    val updateKey = new UpdateKey(key, id)
     pendingPersisted -= updateKey
-    keyToReplicator.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => {
+    keyToSender.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => {
       if (!pendingReplicated.contains(updateKey)) tuple._1 ! OperationAck(id)
       tuple._2.cancel()
     })
     keyToCount -= updateKey
-    keyToReplicator -= updateKey
+    keyToSender -= updateKey
   }
 
   def handleReplicas(replicas: Set[ActorRef]) = {
-    val obsoleteReplicas: Map[ActorRef, ActorRef] = secondaryToReplicator.filter((tuple: (ActorRef, ActorRef)) => !replicas.contains(tuple._2))
-    obsoleteReplicas.foreach((tuple: (ActorRef, ActorRef)) => {
-      tuple._2 ! PoisonPill //kill replicator
-    })
-    secondaryToReplicator = replicas.filter((ref: ActorRef) => ref != self).map((secondary: ActorRef) => secondary -> context.actorOf(Replicator.props(secondary))).toMap
-    replicators = secondaryToReplicator.values.toSet
+    replicators.diff(replicas).foreach((ref: ActorRef) => ref ! PoisonPill)
+    replicators = replicas.filter((ref: ActorRef) => ref != self).map((secondary: ActorRef) => context.actorOf(Replicator.props(secondary)))
     forwardKeyValuesToReplicators()
   }
 
