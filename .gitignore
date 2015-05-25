@@ -22,3 +22,6 @@ project/plugins/project/
 
 # MacOS
 .DS_Store
+
+# Akka
+journal

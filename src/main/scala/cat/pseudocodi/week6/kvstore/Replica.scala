@@ -1,5 +1,6 @@
 package cat.pseudocodi.week6.kvstore
 
+import akka.actor.SupervisorStrategy.Resume
 import akka.actor._
 
 object Replica {
@@ -48,6 +49,10 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   var sequence = 0
   var persistence: ActorRef = context.actorOf(persistenceProps)
+
+  override val supervisorStrategy = OneForOneStrategy() {
+    case _: PersistenceException => Resume
+  }
 
   override def preStart(): scala.Unit = {
     arbiter ! Join
@@ -165,7 +170,6 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     })
     pendingReplicated = pendingReplicateStateCopy
   }
-
 
   def handleReplicatedOK(key: String, id: Long): Unit = {
     val updateKey: UpdateKey = new UpdateKey(key, id)

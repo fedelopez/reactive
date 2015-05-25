@@ -3,8 +3,9 @@
  */
 package cat.pseudocodi.week6.kvstore
 
-import akka.actor.ActorSystem
-import akka.testkit.{ImplicitSender, TestKit}
+import akka.actor.{ActorSystem, Props}
+import akka.testkit.{ImplicitSender, TestKit, TestProbe}
+import cat.pseudocodi.week6.kvstore.Replica.{Get, GetResult, Insert, OperationAck}
 import org.scalactic.ConversionCheckedTripleEquals
 import org.scalatest.{BeforeAndAfterAll, FunSuiteLike, Matchers}
 
@@ -25,4 +26,49 @@ with Tools {
    * then run that with flaky Persistence and/or unreliable communication (injected by
    * using an Arbiter variant that introduces randomly message-dropping forwarder Actors).
    */
+  test("case1: Primary should react properly to Insert, Remove, Get") {
+    val arbiter = system.actorOf(Props.create(classOf[Arbiter]), "case1-arbiter")
+    val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = false)), "case1-primary")
+    val client = session(primary)
+
+    client.getAndVerify("k1")
+    client.setAcked("k1", "v1")
+    client.getAndVerify("k1")
+    client.getAndVerify("k2")
+    client.setAcked("k2", "v2")
+    client.getAndVerify("k2")
+    client.removeAcked("k1")
+    client.getAndVerify("k1")
+  }
+
+  test("case2: Primary should react properly to Insert with flaky") {
+    val arbiter = system.actorOf(Props.create(classOf[Arbiter]), "case2-arbiter")
+    val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case2-primary")
+
+    val client = TestProbe()
+
+    for (x <- 1 to 10) {
+      client.send(primary, Insert(s"k$x", s"val$x", x))
+      client.expectMsg(OperationAck(x))
+    }
+  }
+
+  test("case3: Secondary should react properly to Get") {
+    val arbiter = system.actorOf(Props.create(classOf[Arbiter]), "case3-arbiter")
+    val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = false)), "case3-primary")
+
+    val client = TestProbe()
+
+    client.send(primary, Insert("k1", "val1", 0))
+    client.expectMsg(OperationAck(0))
+
+    client.send(primary, Get("k1", 1))
+    client.expectMsg(GetResult("k1", Option("val1"), 1))
+
+    val secondary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = false)), "case3-secondary")
+    Thread.sleep(200)
+    client.send(secondary, Get("k1", 0))
+    client.expectMsg(GetResult("k1", Option("val1"), 0))
+  }
+
 }
