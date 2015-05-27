@@ -10,8 +10,6 @@ object Persistence {
 
   case class Persisted(key: String, id: Long)
 
-  case class PersistTimeout(key: String, id: Long)
-
   class PersistenceException extends Exception("Persistence failure")
 
   def props(flaky: Boolean): Props = Props(classOf[Persistence], flaky)
