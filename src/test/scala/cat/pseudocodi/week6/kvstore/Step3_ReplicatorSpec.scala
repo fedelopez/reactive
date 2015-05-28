@@ -2,7 +2,7 @@ package cat.pseudocodi.week6.kvstore
 
 import akka.actor.ActorSystem
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
-import cat.pseudocodi.week6.kvstore.Replicator.{Replicate, Snapshot, SnapshotAck}
+import cat.pseudocodi.week6.kvstore.Replicator.{Replicate, Replicated, Snapshot, SnapshotAck}
 import org.scalactic.ConversionCheckedTripleEquals
 import org.scalatest.{BeforeAndAfterAll, FunSuiteLike, Matchers}
 
@@ -54,6 +54,25 @@ with Tools {
     secondary.expectMsg(300.milliseconds, Snapshot("k1", Some("v1"), 0L))
 
     secondary.reply(SnapshotAck("k1", 0L))
+  }
+
+  test("case3: Replicator should keep track of messages with same key") {
+    val primary = TestProbe()
+    val secondary = TestProbe()
+    val replicator = system.actorOf(Replicator.props(secondary.ref), "case3-replicator")
+
+    primary.send(replicator, Replicate("k1", Some("v1"), 0L))
+    primary.send(replicator, Replicate("k1", Some("v1"), 1L))
+
+    Thread.sleep(500)
+
+    secondary.expectMsgAllClassOf(classOf[Snapshot])
+    secondary.reply(SnapshotAck("k1", 0L))
+    secondary.reply(SnapshotAck("k1", 1L))
+
+    val actual = primary.receiveN(2).seq
+    assert(actual.contains(Replicated("k1", 0L)))
+    assert(actual.contains(Replicated("k1", 1L)))
   }
 
 }

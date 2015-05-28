@@ -17,7 +17,7 @@ object Replica {
 
   case class Get(key: String, id: Long) extends Operation
 
-  case class Timeout(key: String, id: Long)
+  case class Timeout(id: Long)
 
   sealed trait OperationReply
 
@@ -43,13 +43,12 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   var kv = Map.empty[String, String]
   var replicators = Set.empty[ActorRef]
-
-  var pendingReplicated = Map.empty[UpdateKey, PendingReplicateState]
-  var pendingPersisted = Map.empty[UpdateKey, ActorRef]
-  var keyToSender = Map.empty[UpdateKey, (ActorRef, Cancellable)]
-
-  var sequence = 0
   var persistence: ActorRef = context.actorOf(persistenceProps)
+  var sequence = 0
+
+  var pendingReplicated = List.empty[PendingReplicateState]
+  var pendingPersisted = Map.empty[Long, ActorRef]
+  var currentTimers = Map.empty[Long, Cancellable]
 
   override val supervisorStrategy = OneForOneStrategy() {
     case _: PersistenceException => Resume
@@ -71,7 +70,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Persisted(key, id) => handlePersisted(key, id)
     case Replicas(replicas) => handleReplicas(replicas)
     case Replicated(key, id) => handleReplicatedOK(key, id)
-    case Timeout(key, id) => handleTimeout(key, id)
+    case Timeout(id) => handleTimeout(id)
   }
 
   val replica: Receive = {
@@ -82,17 +81,18 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
         if (value.isDefined) kv += key -> value.get
         else kv -= key
         val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, persistence, Persist(key, value, seq))
-        keyToSender += new UpdateKey(key, seq) ->(sender(), cancellable)
+        currentTimers += seq -> cancellable
+        pendingPersisted += seq -> sender()
       }
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
     case Persisted(key, id) =>
-      val updateKey = new UpdateKey(key, id)
-      keyToSender.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => {
-        tuple._1 ! SnapshotAck(key, sequence)
-        tuple._2.cancel()
+      currentTimers.get(id).foreach((cancellable: Cancellable) => cancellable.cancel())
+      pendingPersisted.get(id).foreach((ref: ActorRef) => {
+        ref ! SnapshotAck(key, id)
       })
-      keyToSender -= updateKey
+      currentTimers -= id
+      pendingPersisted -= id
       sequence += 1
   }
 
@@ -100,53 +100,48 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     if (value.isDefined) kv += key -> value.get
     else kv -= key
 
-    val updateKey = new UpdateKey(key, id)
-    scheduleTimeoutForUpdate(updateKey)
-    val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, persistence, Persist(updateKey.key, value, updateKey.id))
-    keyToSender += updateKey ->(sender(), cancellable)
-    forwardKeyToReplicators(key, value)
-  }
-
-  def scheduleTimeoutForUpdate(updateKey: UpdateKey) = {
-    if (replicators.nonEmpty) pendingReplicated += updateKey -> new PendingReplicateState(sender(), replicators)
-    pendingPersisted += updateKey -> sender()
-    context.system.scheduler.scheduleOnce(1.second, self, Timeout(updateKey.key, updateKey.id))
+    val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, persistence, Persist(key, value, id))
+    currentTimers += id -> cancellable
+    pendingPersisted += id -> sender()
+    context.system.scheduler.scheduleOnce(1.second, self, Timeout(id))
+    forwardKeyToReplicators(id, key, value)
   }
 
   def handlePersisted(key: String, id: Long) = {
-    val updateKey = new UpdateKey(key, id)
-    pendingPersisted -= updateKey
-    keyToSender.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => {
-      if (!pendingReplicated.contains(updateKey)) tuple._1 ! OperationAck(id)
-      tuple._2.cancel()
-    })
-    keyToSender -= updateKey
+    currentTimers.get(id).foreach((cancellable: Cancellable) => cancellable.cancel())
+    val pending = pendingReplicated.find((state: PendingReplicateState) => state.ids.contains(id) && state.replicators.exists((ref: ActorRef) => replicators.contains(ref)))
+    if (pending.isEmpty) pendingPersisted.get(id).foreach((ref: ActorRef) => ref ! OperationAck(id))
+    currentTimers -= id
+    pendingPersisted -= id
   }
 
   def handleReplicas(replicas: Set[ActorRef]) = {
     val obsolete: Set[ActorRef] = replicators.diff(replicas)
-    removeObsoleteReplicators(obsolete)
     obsolete.foreach((ref: ActorRef) => ref ! PoisonPill)
+    cleanupObsoleteReplicatorsFromPending(obsolete)
     replicators = replicas.filter((ref: ActorRef) => ref != self).map((secondary: ActorRef) => context.actorOf(Replicator.props(secondary)))
+    var ids = List.empty[Long]
     replicators.foreach((replicator: ActorRef) => {
-      var seq = 0
       kv.foreach((tuple: (String, String)) => {
-        replicator ! Replicate(tuple._1, Option(tuple._2), seq)
-        seq += 1
+        val seq: Long = nextSeq
+        ids = seq :: ids
+        val message: Replicate = Replicate(tuple._1, Option(tuple._2), seq)
+        replicator ! message
       })
     })
+    pendingReplicated = new PendingReplicateState(ids, None, sender(), replicators) :: pendingReplicated
   }
 
-  def removeObsoleteReplicators(obsolete: Set[ActorRef]) = {
-    var pendingReplicateStateCopy = Map.empty[UpdateKey, PendingReplicateState]
-    obsolete.foreach((ref: ActorRef) => {
-      pendingReplicated.foreach((tuple: (UpdateKey, PendingReplicateState)) => {
-        val state: PendingReplicateState = tuple._2.removeReplicator(ref)
-        if (state.replicators.nonEmpty) {
-          pendingReplicateStateCopy += tuple._1 -> state
+  def cleanupObsoleteReplicatorsFromPending(obsolete: Set[ActorRef]) = {
+    var pendingReplicateStateCopy = List.empty[PendingReplicateState]
+    obsolete.foreach((replicator: ActorRef) => {
+      pendingReplicated.foreach((state: PendingReplicateState) => {
+        val newState: PendingReplicateState = state.removeReplicator(replicator)
+        if (newState.replicators.nonEmpty) {
+          pendingReplicateStateCopy = newState :: pendingReplicateStateCopy
         }
-        if (tuple._2.replicators.contains(ref) && state.replicators.isEmpty && !pendingPersisted.contains(tuple._1)) {
-          tuple._2.sender ! OperationAck(tuple._1.id)
+        if (state.replicators.contains(replicator) && newState.replicators.isEmpty && state.originalId.isDefined && !pendingPersisted.contains(state.originalId.get)) {
+          state.sender ! OperationAck(state.originalId.get)
         }
       })
     })
@@ -154,39 +149,51 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
   def handleReplicatedOK(key: String, id: Long) = {
-    val updateKey: UpdateKey = new UpdateKey(key, id)
-    if (pendingReplicated.contains(updateKey)) {
-      var state = pendingReplicated.get(updateKey).get
-      state = state.removeReplicator(sender())
-      if (state.replicators.isEmpty) {
-        pendingReplicated -= updateKey
-        if (!pendingPersisted.contains(updateKey)) state.sender ! OperationAck(id)
+    val idInState: PendingReplicateState => Boolean = (state: PendingReplicateState) => state.ids.contains(id)
+    if (pendingReplicated.exists(idInState)) {
+      val state = pendingReplicated.find(idInState).get
+      val newState = state.removeReplicator(sender()).removeId(id)
+      pendingReplicated = pendingReplicated.filter(idInState)
+      if (newState.replicators.isEmpty) {
+        if (state.originalId.isDefined && !pendingPersisted.contains(state.originalId.get)) {
+          state.sender ! OperationAck(state.originalId.get)
+        }
       } else {
-        pendingReplicated += updateKey -> state
+        pendingReplicated = newState :: pendingReplicated
       }
     }
   }
 
-  def handleTimeout(key: String, id: Long) = {
-    val updateKey: UpdateKey = new UpdateKey(key, id)
-    if (pendingReplicated.contains(updateKey) && pendingReplicated.get(updateKey).get.replicators.nonEmpty) {
-      pendingReplicated.get(updateKey).get.sender ! OperationFailed(id)
+  def handleTimeout(id: Long) = {
+    val idInState: PendingReplicateState => Boolean = (state: PendingReplicateState) => state.ids.contains(id)
+    val find: Option[PendingReplicateState] = pendingReplicated.find(idInState)
+    if (find.isDefined && find.get.replicators.nonEmpty && find.get.replicators.exists((ref: ActorRef) => replicators.contains(ref))) {
+      find.get.sender ! OperationFailed(id)
     }
     else {
-      keyToSender.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => tuple._1 ! OperationFailed(updateKey.id))
+      pendingPersisted.get(id).foreach((ref: ActorRef) => ref ! OperationFailed(id))
     }
-    keyToSender.get(updateKey).foreach((tuple: (ActorRef, Cancellable)) => tuple._2.cancel())
-    keyToSender -= updateKey
-    pendingReplicated -= updateKey
+    currentTimers.get(id).foreach((cancellable: Cancellable) => cancellable.cancel())
+    currentTimers -= id
+    pendingPersisted -= id
+    pendingReplicated = pendingReplicated.filterNot(idInState)
   }
 
-  def forwardKeyToReplicators(key: String, value: Option[String]) = {
-    var seq = 0
+  def forwardKeyToReplicators(id: Long, key: String, value: Option[String]) = {
+    var ids: Set[Long] = replicators.map((ref: ActorRef) => nextSeq)
+    pendingReplicated = new PendingReplicateState(ids.toList, Option(id), sender(), replicators) :: pendingReplicated
     replicators.foreach((replicator: ActorRef) => {
-      replicator ! Replicate(key, value, seq)
-      seq += 1
+      replicator ! Replicate(key, value, ids.head)
+      ids = ids.tail
     })
   }
+
+  def nextSeq: Long = {
+    val ret = sequence
+    sequence += 1
+    ret
+  }
+
 
 }
 

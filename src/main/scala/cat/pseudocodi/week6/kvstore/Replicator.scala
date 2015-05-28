@@ -22,17 +22,8 @@ class Replicator(val replica: ActorRef) extends Actor {
 
   import scala.concurrent.duration._
 
-  /*
-   * The contents of this actor is just a suggestion, you can implement it in any way you like.
-   */
-
   // map from sequence number to pair of sender and request
-  var acks = Map.empty[Long, (ActorRef, Replicate)]
-  // a sequence of not-yet-sent snapshots (you can disregard this if not implementing batching)
-  var pending = Vector.empty[Snapshot]
-
-  var ticks = Map.empty[String, (ActorRef, Cancellable)]
-
+  var pendingAcks = Map.empty[Long, (ActorRef, Replicate, Cancellable)]
   var _seqCounter = 0L
 
   def nextSeq = {
@@ -42,16 +33,17 @@ class Replicator(val replica: ActorRef) extends Actor {
   }
 
   def receive: Receive = {
-    case Replicate(key, valueOption, seq) =>
-      val msg: Snapshot = Snapshot(key, valueOption, nextSeq)
+    case Replicate(key, valueOption, id) =>
+      val seq: Long = nextSeq
+      val msg: Snapshot = Snapshot(key, valueOption, seq)
       val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, replica, msg)
-      ticks += key ->(sender(), cancellable)
+      pendingAcks += seq ->(sender(), Replicate(key, valueOption, id), cancellable)
     case SnapshotAck(key, seq) =>
-      ticks.get(key).foreach((tuple: (ActorRef, Cancellable)) => {
-        tuple._2.cancel()
-        tuple._1 ! Replicated(key, seq)
+      pendingAcks.get(seq).foreach((tuple: (ActorRef, Replicate, Cancellable)) => {
+        tuple._3.cancel()
+        tuple._1 ! Replicated(key, tuple._2.id)
       })
-      ticks -= key
+      pendingAcks -= seq
   }
 
 }

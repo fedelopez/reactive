@@ -8,12 +8,14 @@ import akka.actor.ActorRef
 
 object States {
 
-  case class UpdateKey(key: String, id: Long)
-
-  case class PendingReplicateState(sender: ActorRef, replicators: Set[ActorRef]) {
+  case class PendingReplicateState(ids: List[Long], originalId: Option[Long], sender: ActorRef, replicators: Set[ActorRef]) {
 
     def removeReplicator(r: ActorRef): PendingReplicateState = {
-      new PendingReplicateState(sender, replicators.filter(_ != r))
+      new PendingReplicateState(ids, originalId, sender, replicators.filter(_ != r))
+    }
+
+    def removeId(id: Long): PendingReplicateState = {
+      new PendingReplicateState(ids.filter(_ != id), originalId, sender, replicators)
     }
   }
 
