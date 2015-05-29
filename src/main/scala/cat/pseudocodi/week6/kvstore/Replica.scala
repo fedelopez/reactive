@@ -67,7 +67,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Insert(key, value, id) => handleUpdate(key, Option(value), id)
     case Remove(key, id) => handleUpdate(key, None, id)
     case Get(key, id) => sender() ! GetResult(key, kv.get(key), id)
-    case Persisted(key, id) => handlePersisted(key, id)
+    case Persisted(key, id) => handlePersisted(key, id, OperationAck(id))
     case Replicas(replicas) => handleReplicas(replicas)
     case Replicated(key, id) => handleReplicatedOK(key, id)
     case Timeout(id) => handleTimeout(id)
@@ -84,16 +84,8 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
         currentTimers += seq -> cancellable
         pendingPersisted += seq -> sender()
       }
-    case Get(key, id) =>
-      sender() ! GetResult(key, kv.get(key), id)
-    case Persisted(key, id) =>
-      currentTimers.get(id).foreach((cancellable: Cancellable) => cancellable.cancel())
-      pendingPersisted.get(id).foreach((ref: ActorRef) => {
-        ref ! SnapshotAck(key, id)
-      })
-      currentTimers -= id
-      pendingPersisted -= id
-      sequence += 1
+    case Get(key, id) => sender() ! GetResult(key, kv.get(key), id)
+    case Persisted(key, id) => handlePersisted(key, id, SnapshotAck(key, id)); sequence += 1
   }
 
   def handleUpdate(key: String, value: Option[String], id: Long) = {
@@ -107,10 +99,10 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     forwardKeyToReplicators(id, key, value)
   }
 
-  def handlePersisted(key: String, id: Long) = {
+  def handlePersisted(key: String, id: Long, msg: Any) = {
     currentTimers.get(id).foreach((cancellable: Cancellable) => cancellable.cancel())
     val pending = pendingReplicated.find((state: PendingReplicateState) => state.ids.contains(id) && state.replicators.exists((ref: ActorRef) => replicators.contains(ref)))
-    if (pending.isEmpty) pendingPersisted.get(id).foreach((ref: ActorRef) => ref ! OperationAck(id))
+    if (pending.isEmpty) pendingPersisted.get(id).foreach((ref: ActorRef) => ref ! msg)
     currentTimers -= id
     pendingPersisted -= id
   }
