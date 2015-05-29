@@ -64,8 +64,8 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
   val leader: Receive = {
-    case Insert(key, value, id) => handleUpdate(key, Option(value), id)
-    case Remove(key, id) => handleUpdate(key, None, id)
+    case Insert(key, value, id) => persist(key, Option(value), id)
+    case Remove(key, id) => persist(key, None, id)
     case Get(key, id) => sender() ! GetResult(key, kv.get(key), id)
     case Persisted(key, id) => handlePersisted(key, id, OperationAck(id))
     case Replicas(replicas) => handleReplicas(replicas)
@@ -77,21 +77,14 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Snapshot(key, value, seq) =>
       if (seq > sequence) () // ignore, not yet ready for that
       else if (seq < sequence) sender() ! SnapshotAck(key, seq)
-      else {
-        if (value.isDefined) kv += key -> value.get
-        else kv -= key
-        val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, persistence, Persist(key, value, seq))
-        currentTimers += seq -> cancellable
-        pendingPersisted += seq -> sender()
-      }
+      else persist(key, value, seq)
     case Get(key, id) => sender() ! GetResult(key, kv.get(key), id)
     case Persisted(key, id) => handlePersisted(key, id, SnapshotAck(key, id)); sequence += 1
   }
 
-  def handleUpdate(key: String, value: Option[String], id: Long) = {
+  def persist(key: String, value: Option[String], id: Long) = {
     if (value.isDefined) kv += key -> value.get
     else kv -= key
-
     val cancellable: Cancellable = context.system.scheduler.schedule(Duration.Zero, 100.milliseconds, persistence, Persist(key, value, id))
     currentTimers += id -> cancellable
     pendingPersisted += id -> sender()
@@ -172,12 +165,14 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
   def forwardKeyToReplicators(id: Long, key: String, value: Option[String]) = {
-    var ids: Set[Long] = replicators.map((ref: ActorRef) => nextSeq)
-    pendingReplicated = new PendingReplicateState(ids.toList, Option(id), sender(), replicators) :: pendingReplicated
-    replicators.foreach((replicator: ActorRef) => {
-      replicator ! Replicate(key, value, ids.head)
-      ids = ids.tail
-    })
+    if (replicators.nonEmpty) {
+      var ids: Set[Long] = replicators.map((ref: ActorRef) => nextSeq)
+      pendingReplicated = new PendingReplicateState(ids.toList, Option(id), sender(), replicators) :: pendingReplicated
+      replicators.foreach((replicator: ActorRef) => {
+        replicator ! Replicate(key, value, ids.head)
+        ids = ids.tail
+      })
+    }
   }
 
   def nextSeq: Long = {
