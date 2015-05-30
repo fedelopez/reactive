@@ -94,14 +94,14 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   def handlePersisted(key: String, id: Long, msg: Any) = {
     currentTimers.get(id).foreach((cancellable: Cancellable) => cancellable.cancel())
-    val pending = pendingReplicated.find((state: PendingReplicateState) => state.ids.contains(id) && state.replicators.exists((ref: ActorRef) => replicators.contains(ref)))
+    val pending = pendingReplicated.find((state: PendingReplicateState) => state.originalId.contains(id))
     if (pending.isEmpty) pendingPersisted.get(id).foreach((ref: ActorRef) => ref ! msg)
     currentTimers -= id
     pendingPersisted -= id
   }
 
   def replicate(replicas: Set[ActorRef]) = {
-    val obsolete: Set[ActorRef] = replicators.diff(replicas)
+    val obsolete = replicators.diff(replicas)
     obsolete.foreach((ref: ActorRef) => ref ! PoisonPill)
     cleanupObsoleteReplicatorsFromPending(obsolete)
     replicators = replicas.filter((ref: ActorRef) => ref != self).map((secondary: ActorRef) => context.actorOf(Replicator.props(secondary)))
@@ -110,8 +110,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       kv.foreach((tuple: (String, String)) => {
         val seq: Long = nextSeq
         ids = seq :: ids
-        val message: Replicate = Replicate(tuple._1, Option(tuple._2), seq)
-        replicator ! message
+        replicator ! Replicate(tuple._1, Option(tuple._2), seq)
       })
     })
     pendingReplicated = new PendingReplicateState(ids, None, sender(), replicators) :: pendingReplicated
@@ -134,14 +133,14 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
   def handleReplicated(key: String, id: Long) = {
-    val idInState: PendingReplicateState => Boolean = (state: PendingReplicateState) => state.ids.contains(id)
-    if (pendingReplicated.exists(idInState)) {
-      val state = pendingReplicated.find(idInState).get
-      val newState = state.removeReplicator(sender()).removeId(id)
-      pendingReplicated = pendingReplicated.filter(idInState)
-      if (newState.replicators.isEmpty) {
-        if (state.originalId.isDefined && !pendingPersisted.contains(state.originalId.get)) {
-          state.sender ! OperationAck(state.originalId.get)
+    val state = pendingReplicated.find(_.ids.contains(id))
+    if (state.isDefined) {
+      val oldState = state.get
+      pendingReplicated = pendingReplicated.diff(List(oldState))
+      val newState = oldState.removeReplicator(sender()).removeId(id)
+      if (newState.replicators.isEmpty || newState.replicators.forall(!replicators.contains(_))) {
+        if (oldState.originalId.isDefined && !oldState.originalId.exists((l: Long) => pendingPersisted.contains(l))) {
+          oldState.sender ! OperationAck(oldState.originalId.get)
         }
       } else {
         pendingReplicated = newState :: pendingReplicated
@@ -150,8 +149,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
   def handleTimeout(id: Long) = {
-    val idInState: PendingReplicateState => Boolean = (state: PendingReplicateState) => state.ids.contains(id)
-    val find: Option[PendingReplicateState] = pendingReplicated.find(idInState)
+    val find: Option[PendingReplicateState] = pendingReplicated.find(_.ids.contains(id))
     if (find.isDefined && find.get.replicators.nonEmpty && find.get.replicators.exists((ref: ActorRef) => replicators.contains(ref))) {
       find.get.sender ! OperationFailed(id)
     }
@@ -161,17 +159,14 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     currentTimers.get(id).foreach((cancellable: Cancellable) => cancellable.cancel())
     currentTimers -= id
     pendingPersisted -= id
-    pendingReplicated = pendingReplicated.filterNot(idInState)
+    find.foreach((state: PendingReplicateState) => pendingReplicated = pendingReplicated.filterNot(_.ids.contains(id)))
   }
 
   def forwardKeyToReplicators(id: Long, key: String, value: Option[String]) = {
     if (replicators.nonEmpty) {
-      var ids: Set[Long] = replicators.map((ref: ActorRef) => nextSeq)
+      val ids: Set[Long] = replicators.map((ref: ActorRef) => nextSeq)
       pendingReplicated = new PendingReplicateState(ids.toList, Option(id), sender(), replicators) :: pendingReplicated
-      replicators.foreach((replicator: ActorRef) => {
-        replicator ! Replicate(key, value, ids.head)
-        ids = ids.tail
-      })
+      ids.zip(replicators).foreach((tuple: (Long, ActorRef)) => tuple._2 ! Replicate(key, value, tuple._1))
     }
   }
 
@@ -180,7 +175,5 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     sequence += 1
     ret
   }
-
-
 }
 
