@@ -68,8 +68,8 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Remove(key, id) => persist(key, None, id)
     case Get(key, id) => sender() ! GetResult(key, kv.get(key), id)
     case Persisted(key, id) => handlePersisted(key, id, OperationAck(id))
-    case Replicas(replicas) => handleReplicas(replicas)
-    case Replicated(key, id) => handleReplicatedOK(key, id)
+    case Replicas(replicas) => replicate(replicas)
+    case Replicated(key, id) => handleReplicated(key, id)
     case Timeout(id) => handleTimeout(id)
   }
 
@@ -77,9 +77,9 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Snapshot(key, value, seq) =>
       if (seq > sequence) () // ignore, not yet ready for that
       else if (seq < sequence) sender() ! SnapshotAck(key, seq)
-      else persist(key, value, seq)
+      else persist(key, value, nextSeq)
     case Get(key, id) => sender() ! GetResult(key, kv.get(key), id)
-    case Persisted(key, id) => handlePersisted(key, id, SnapshotAck(key, id)); sequence += 1
+    case Persisted(key, id) => handlePersisted(key, id, SnapshotAck(key, id))
   }
 
   def persist(key: String, value: Option[String], id: Long) = {
@@ -100,7 +100,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     pendingPersisted -= id
   }
 
-  def handleReplicas(replicas: Set[ActorRef]) = {
+  def replicate(replicas: Set[ActorRef]) = {
     val obsolete: Set[ActorRef] = replicators.diff(replicas)
     obsolete.foreach((ref: ActorRef) => ref ! PoisonPill)
     cleanupObsoleteReplicatorsFromPending(obsolete)
@@ -133,7 +133,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     pendingReplicated = pendingReplicateStateCopy
   }
 
-  def handleReplicatedOK(key: String, id: Long) = {
+  def handleReplicated(key: String, id: Long) = {
     val idInState: PendingReplicateState => Boolean = (state: PendingReplicateState) => state.ids.contains(id)
     if (pendingReplicated.exists(idInState)) {
       val state = pendingReplicated.find(idInState).get

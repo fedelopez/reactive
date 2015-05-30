@@ -55,7 +55,7 @@ with Tools {
 
   test("case3: Secondary should react properly to Get") {
     val arbiter = system.actorOf(Props.create(classOf[Arbiter]), "case3-arbiter")
-    val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = false)), "case3-primary")
+    val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case3-primary")
 
     val client = TestProbe()
 
@@ -65,10 +65,33 @@ with Tools {
     client.send(primary, Get("k1", 1))
     client.expectMsg(GetResult("k1", Option("val1"), 1))
 
-    val secondary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = false)), "case3-secondary")
+    val secondary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case3-secondary")
     Thread.sleep(200)
     client.send(secondary, Get("k1", 0))
     client.expectMsg(GetResult("k1", Option("val1"), 0))
   }
+
+  test("case4: Primary should react properly to Insert with secondaries") {
+    val arbiter = system.actorOf(Props.create(classOf[Arbiter]), "case4-arbiter")
+    val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case4-primary")
+    val clientPrimary = session(primary)
+    val clientSecondary = TestProbe()
+
+    clientPrimary.setAcked("key42", "42")
+
+    val secondary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case4-secondary")
+    Thread.sleep(1000)
+    clientSecondary.send(secondary, Get("key42", 0))
+    clientSecondary.expectMsg(GetResult("key42", Option("42"), 0))
+
+    clientPrimary.setAcked("key43", "43")
+    clientPrimary.setAcked("key44", "44")
+
+    clientSecondary.send(secondary, Get("key43", 1))
+    clientSecondary.expectMsg(GetResult("key43", Option("43"), 1))
+    clientSecondary.send(secondary, Get("key44", 2))
+    clientSecondary.expectMsg(GetResult("key44", Option("44"), 2))
+  }
+
 
 }
