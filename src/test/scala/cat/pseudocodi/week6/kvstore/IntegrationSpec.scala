@@ -11,6 +11,11 @@ import org.scalatest.{BeforeAndAfterAll, FunSuiteLike, Matchers}
 
 import scala.concurrent.duration._
 
+/*
+ * Recommendation: write a test case that verifies proper function of the whole system,
+ * then run that with flaky Persistence and/or unreliable communication (injected by
+ * using an Arbiter variant that introduces randomly message-dropping forwarder Actors).
+ */
 class IntegrationSpec(_system: ActorSystem) extends TestKit(_system)
 with FunSuiteLike
 with Matchers
@@ -23,11 +28,6 @@ with Tools {
 
   override def afterAll: Unit = system.shutdown()
 
-  /*
-   * Recommendation: write a test case that verifies proper function of the whole system,
-   * then run that with flaky Persistence and/or unreliable communication (injected by
-   * using an Arbiter variant that introduces randomly message-dropping forwarder Actors).
-   */
   test("case1: Primary should react properly to Insert, Remove, Get") {
     val arbiter = system.actorOf(Props.create(classOf[Arbiter]), "case1-arbiter")
     val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = false)), "case1-primary")
@@ -121,5 +121,26 @@ with Tools {
       clientSecondary2.send(secondary2, Get(s"key$x", x))
       clientSecondary2.expectMsg(GetResult(s"key$x", Option(s"$x"), x))
     }
+  }
+
+  test("case6: Primary should react properly to Delete with secondaries") {
+    val arbiter = system.actorOf(Props.create(classOf[Arbiter]), "case6-arbiter")
+    val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case6-primary")
+    val clientPrimary = session(primary)
+    val clientSecondary1 = TestProbe()
+    val clientSecondary2 = TestProbe()
+
+    clientPrimary.setAcked("key42", "42")
+    clientPrimary.nothingHappens(200.millis)
+
+    val secondary1 = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case6-secondary-1")
+    val secondary2 = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case6-secondary-2")
+    Thread.sleep(1000)
+
+    clientPrimary.removeAcked("key42")
+    clientSecondary1.send(secondary1, Get("42", 11))
+    clientSecondary1.expectMsg(GetResult("42", None, 11))
+    clientSecondary2.send(secondary2, Get("42", 11))
+    clientSecondary2.expectMsg(GetResult("42", None, 11))
   }
 }
