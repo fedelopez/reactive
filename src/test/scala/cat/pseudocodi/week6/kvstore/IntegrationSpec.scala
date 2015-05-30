@@ -3,9 +3,11 @@
  */
 package cat.pseudocodi.week6.kvstore
 
-import akka.actor.{ActorSystem, Props}
+import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
+import cat.pseudocodi.week6.kvstore.Arbiter.{Join, JoinedPrimary, JoinedSecondary, Replicas}
 import cat.pseudocodi.week6.kvstore.Replica.{Get, GetResult, Insert, OperationAck}
+import cat.pseudocodi.week6.kvstore.Replicator.Snapshot
 import org.scalactic.ConversionCheckedTripleEquals
 import org.scalatest.{BeforeAndAfterAll, FunSuiteLike, Matchers}
 
@@ -104,22 +106,18 @@ with Tools {
     val arbiter = system.actorOf(Props.create(classOf[Arbiter]), "case5-arbiter")
     val primary = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case5-primary")
     val clientPrimary = session(primary)
-    val clientSecondary1 = TestProbe()
-    val clientSecondary2 = TestProbe()
 
     clientPrimary.setAcked("key42", "42")
     clientPrimary.nothingHappens(200.millis)
 
-    val secondary1 = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case5-secondary-1")
-    val secondary2 = system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case5-secondary-2")
+    val clientSecondary1 = session(system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case5-secondary-1"))
+    val clientSecondary2 = session(system.actorOf(Replica.props(arbiter, Persistence.props(flaky = true)), "case5-secondary-2"))
     Thread.sleep(1000)
 
     for (x <- 0 to 10) {
       clientPrimary.setAcked(s"key$x", s"$x")
-      clientSecondary1.send(secondary1, Get(s"key$x", x))
-      clientSecondary1.expectMsg(GetResult(s"key$x", Option(s"$x"), x))
-      clientSecondary2.send(secondary2, Get(s"key$x", x))
-      clientSecondary2.expectMsg(GetResult(s"key$x", Option(s"$x"), x))
+      assert(Some(s"$x") === clientSecondary1.get(s"key$x"))
+      assert(Some(s"$x") === clientSecondary2.get(s"key$x"))
     }
   }
 
@@ -142,5 +140,101 @@ with Tools {
     clientSecondary1.expectMsg(GetResult("42", None, 11))
     clientSecondary2.send(secondary2, Get("42", 11))
     clientSecondary2.expectMsg(GetResult("42", None, 11))
+  }
+
+  test("case7: Primary and secondaries must work in concert when persistence and communication to secondaries is unreliable") {
+    val arbiter = TestProbe()
+    val (primary, user) = createPrimary(arbiter, "case7-primary", flakyPersistence = true)
+
+    user.setAcked("k1", "v1")
+
+    val (secondary1, replica1) = createSecondary(arbiter, "case7-secondary1", flakyForwarder = true, flakyPersistence = true)
+    val (secondary2, replica2) = createSecondary(arbiter, "case7-secondary2", flakyForwarder = true, flakyPersistence = true)
+
+    arbiter.send(primary, Replicas(Set(primary, secondary1, secondary2)))
+
+    val options = Set(None, Some("v1"))
+    options should contain(replica1.get("k1"))
+    options should contain(replica2.get("k1"))
+
+    user.setAcked("k1", "v2")
+    assert(replica1.get("k1") === Some("v2"))
+    assert(replica2.get("k1") === Some("v2"))
+
+    val (secondary3, replica3) = createSecondary(arbiter, "case7-secondary3", flakyForwarder = true, flakyPersistence = true)
+
+    arbiter.send(primary, Replicas(Set(primary, secondary1, secondary3)))
+
+    replica3.nothingHappens(500.milliseconds)
+
+    assert(replica3.get("k1") === Some("v2"))
+
+    user.removeAcked("k1")
+    assert(replica1.get("k1") === None)
+    assert(replica2.get("k1") === Some("v2"))
+    assert(replica3.get("k1") === None)
+
+    user.setAcked("k1", "v4")
+    assert(replica1.get("k1") === Some("v4"))
+    assert(replica2.get("k1") === Some("v2"))
+    assert(replica3.get("k1") === Some("v4"))
+
+    user.setAcked("k2", "v1")
+    user.setAcked("k3", "v1")
+
+    user.setAcked("k1", "v5")
+    user.removeAcked("k1")
+    user.setAcked("k1", "v7")
+    user.removeAcked("k1")
+    user.setAcked("k1", "v9")
+    assert(replica1.get("k1") === Some("v9"))
+    assert(replica2.get("k1") === Some("v2"))
+    assert(replica3.get("k1") === Some("v9"))
+
+    assert(replica1.get("k2") === Some("v1"))
+    assert(replica2.get("k2") === None)
+    assert(replica3.get("k2") === Some("v1"))
+
+    assert(replica1.get("k3") === Some("v1"))
+    assert(replica2.get("k3") === None)
+    assert(replica3.get("k3") === Some("v1"))
+  }
+
+  def createPrimary(arbiter: TestProbe, name: String, flakyPersistence: Boolean) = {
+    val primary = system.actorOf(Replica.props(arbiter.ref, Persistence.props(flakyPersistence)), name)
+
+    arbiter.expectMsg(Join)
+    arbiter.send(primary, JoinedPrimary)
+
+    (primary, session(primary))
+  }
+
+  def createSecondary(arbiter: TestProbe, name: String, flakyForwarder: Boolean, flakyPersistence: Boolean) = {
+    val secondary =
+      if (flakyForwarder) system.actorOf(Props(new FlakyForwarder(Replica.props(arbiter.ref, Persistence.props(flakyPersistence)), name)), s"flaky-$name")
+      else system.actorOf(Replica.props(arbiter.ref, Persistence.props(flakyPersistence)), name)
+
+    arbiter.expectMsg(Join)
+    arbiter.send(secondary, JoinedSecondary)
+
+    (secondary, session(secondary))
+  }
+
+  class FlakyForwarder(targetProps: Props, name: String) extends Actor with ActorLogging {
+    val child = context.actorOf(targetProps, name)
+    var flipFlop = true
+
+    def receive = {
+      case msg if sender == child =>
+        context.parent forward msg
+
+      case msg: Snapshot =>
+        if (flipFlop) child forward msg
+        else log.debug(s"Dropping $msg")
+        flipFlop = !flipFlop
+
+      case msg =>
+        child forward msg
+    }
   }
 }

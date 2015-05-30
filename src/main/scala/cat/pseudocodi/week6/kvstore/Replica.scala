@@ -30,7 +30,7 @@ object Replica {
   def props(arbiter: ActorRef, persistenceProps: Props): Props = Props(new Replica(arbiter, persistenceProps))
 }
 
-class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
+class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor with ActorLogging {
 
   import cat.pseudocodi.week6.kvstore.Arbiter._
   import cat.pseudocodi.week6.kvstore.Persistence._
@@ -43,6 +43,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   var kv = Map.empty[String, String]
   var replicators = Set.empty[ActorRef]
+  var replicaToReplicator = Map.empty[ActorRef, ActorRef]
   var persistence: ActorRef = context.actorOf(persistenceProps)
   var sequence = 0
 
@@ -101,10 +102,17 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
   def replicate(replicas: Set[ActorRef]) = {
-    val obsolete = replicators.diff(replicas)
-    obsolete.foreach((ref: ActorRef) => ref ! PoisonPill)
-    cleanupObsoleteReplicatorsFromPending(obsolete)
-    replicators = replicas.filter((ref: ActorRef) => ref != self).map((secondary: ActorRef) => context.actorOf(Replicator.props(secondary)))
+    val obsoleteReplicaToReplicator: Map[ActorRef, ActorRef] = replicaToReplicator.filter((tuple: (ActorRef, ActorRef)) => !replicas.contains(tuple._1))
+    val obsoleteReplicators = obsoleteReplicaToReplicator.values.toSet
+    obsoleteReplicators.foreach((ref: ActorRef) => context.system.stop(ref))
+    cleanupObsoleteReplicatorsFromPending(obsoleteReplicators)
+
+    val newReplicas = replicas.filter((ref: ActorRef) => ref != self).diff(replicaToReplicator.keys.toSet)
+    val newReplicaToReplicator: Map[ActorRef, ActorRef] = newReplicas.map((secondary: ActorRef) => secondary -> context.actorOf(Replicator.props(secondary))).toMap
+
+    replicaToReplicator = newReplicaToReplicator ++ replicaToReplicator.filterNot((tuple: (ActorRef, ActorRef)) => obsoleteReplicators.contains(tuple._2))
+    replicators = replicaToReplicator.values.toSet
+
     var ids = List.empty[Long]
     replicators.foreach((replicator: ActorRef) => {
       kv.foreach((tuple: (String, String)) => {
@@ -116,15 +124,15 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     pendingReplicated = new PendingReplicateState(ids, None, sender(), replicators) :: pendingReplicated
   }
 
-  def cleanupObsoleteReplicatorsFromPending(obsolete: Set[ActorRef]) = {
+  def cleanupObsoleteReplicatorsFromPending(obsoletes: Set[ActorRef]) = {
     var pendingReplicateStateCopy = List.empty[PendingReplicateState]
-    obsolete.foreach((replicator: ActorRef) => {
+    obsoletes.foreach((obsolete: ActorRef) => {
       pendingReplicated.foreach((state: PendingReplicateState) => {
-        val newState: PendingReplicateState = state.removeReplicator(replicator)
+        val newState: PendingReplicateState = state.removeReplicator(obsolete)
         if (newState.replicators.nonEmpty) {
           pendingReplicateStateCopy = newState :: pendingReplicateStateCopy
         }
-        if (state.replicators.contains(replicator) && newState.replicators.isEmpty && state.originalId.isDefined && !pendingPersisted.contains(state.originalId.get)) {
+        if (state.replicators.contains(obsolete) && newState.replicators.isEmpty && state.originalId.isDefined && !pendingPersisted.contains(state.originalId.get)) {
           state.sender ! OperationAck(state.originalId.get)
         }
       })
